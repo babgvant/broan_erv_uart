@@ -2,6 +2,7 @@
 
 #include "esphome.h"
 #include <deque>
+#include "protocol.h"
 #include "esphome/core/component.h"
 
 #ifdef USE_SELECT
@@ -176,6 +177,10 @@ class BroanComponent : public Component, public uart::UARTDevice
 	SUB_SENSOR(exhaust_cfm)
 	SUB_SENSOR(supply_rpm)
 	SUB_SENSOR(exhaust_rpm)
+	SUB_SENSOR(fault_code)
+	SUB_SENSOR(warning_code)
+	SUB_SENSOR(base_mode_code)
+	SUB_SENSOR(active_mode_code)
 #endif
 
 #ifdef USE_SELECT
@@ -205,6 +210,12 @@ class BroanComponent : public Component, public uart::UARTDevice
 	SUB_TEXT_SENSOR(warning_code)
 	SUB_TEXT_SENSOR(active_mode)
 	SUB_TEXT_SENSOR(base_mode)
+	SUB_TEXT_SENSOR(last_fault)
+#endif
+
+#ifdef USE_BINARY_SENSOR
+	SUB_BINARY_SENSOR(fault_active)
+	SUB_BINARY_SENSOR(communication_ok)
 #endif
 
 public:
@@ -299,6 +310,18 @@ public:
 public:
 	// Setup
 	void set_flow_control_pin(GPIOPin *flow_control_pin) { this->flow_control_pin_ = flow_control_pin; }
+	void set_passive_mode(bool value) { passive_mode_ = value; }
+	void set_communication_timeout(uint32_t value) { communication_timeout_ = value; }
+	void set_sensor_timeout(uint32_t value) { sensor_timeout_ = value; }
+	void set_log_packets(bool value) { log_packets_ = value; }
+	void set_log_unknown_registers(bool value) { log_unknown_registers_ = value; }
+	void set_register_discovery(bool value) { register_discovery_ = value; }
+	uint32_t get_packets_received() const { return framer_.packets; }
+	uint32_t get_valid_packets() const { return framer_.valid; }
+	uint32_t get_invalid_packets() const { return framer_.invalid; }
+	uint32_t get_checksum_failures() const { return framer_.checksum_failures; }
+	uint32_t get_unknown_registers() const { return unknown_registers_; }
+	float get_last_valid_packet_age() const { return have_valid_packet_ ? (millis() - last_valid_packet_) / 1000.0f : NAN; }
 
 	// Control API
 	void setFanMode( std::string mode );
@@ -311,6 +334,19 @@ public:
 	void setIntermittentPeriod( uint32_t period );
 
 private:
+	bool passive_mode_{false}, log_packets_{false}, log_unknown_registers_{false}, register_discovery_{false};
+	uint32_t communication_timeout_{120000}, sensor_timeout_{300000};
+	PacketFramer framer_;
+	uint32_t last_valid_packet_{0}, unknown_registers_{0}, last_diagnostics_{0};
+	bool have_valid_packet_{false};
+	uint32_t received_at_[BroanField::MAX_FIELDS]{};
+	bool field_seen_[BroanField::MAX_FIELDS]{}, field_stale_[BroanField::MAX_FIELDS]{};
+	uint32_t last_fault_value_{0xFFFFFFFF};
+	struct RegisterObservation { uint32_t requests{0}, responses{0}; };
+	std::map<uint16_t, RegisterObservation> observations_;
+	void updateFreshness();
+	void expireField(uint32_t field);
+	void observeRegister(uint16_t opcode, bool request);
 
 	uint32_t m_nLastHadControl = 0;
 	uint32_t m_unLastHeartbeat = 0; // Next time to send heartbeat
@@ -326,8 +362,6 @@ private:
 #endif
 
 	std::map<uint16_t, std::string> m_mapStrings;
-	std::vector<uint8_t> m_vecHeader;
-	bool m_bHaveHeader = false;
 
 	bool m_bHaveControl = false;
 	bool m_bExpectingReply = false;
@@ -338,8 +372,6 @@ private:
 
 private:
 	// Internal
-	bool readHeader();
-	bool readMessage();
 	void handleMessage(uint8_t sender, uint8_t target, const std::vector<uint8_t>& message);
 	void send(const std::vector<uint8_t>& msg);
 	uint8_t calculateChecksum(uint8_t sender, uint8_t receiver, const std::vector<uint8_t>& message);

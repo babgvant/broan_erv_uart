@@ -1,0 +1,128 @@
+# Requires hardware receive-only modification; see docs/wiring.md before wiring.
+esphome:
+  name: adu-broan-erv
+  friendly_name: ADU ERV
+  min_version: 2026.9.1
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [broan]
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    encryption: {}
+
+logger:
+  baud_rate: 0
+  level: INFO
+  tx_buffer_size: 1024
+
+# GPIO21 is supplemental software control, not the hardware safety barrier.
+# U7 DE and /RE must be disconnected from RS485_EN' and tied to SGND.
+output:
+  - platform: gpio
+    pin: GPIO21
+    id: rs485_direction
+
+uart:
+  id: broan_uart
+  rx_pin: GPIO18
+  # No tx_pin. GPIO17 is intentionally not assigned to any peripheral.
+  baud_rate: 38400
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  rx_buffer_size: 2048
+
+broan:
+  id: erv
+  uart_id: broan_uart
+  passive_mode: true
+  communication_timeout: 120s
+  sensor_timeout: 300s
+  log_packets: false
+  log_unknown_registers: false
+  register_discovery: false
+
+sensor:
+  - platform: broan
+    power: {name: Power}
+    temperature: {name: Intake Temperature}
+    temperature_out: {name: Exhaust Temperature}
+    filter_life: {name: Filter Life}
+    supply_fan_cfm: {name: Supply Fan CFM}
+    exhaust_fan_cfm: {name: Exhaust Fan CFM}
+    supply_fan_rpm: {name: Supply Fan RPM}
+    exhaust_fan_rpm: {name: Exhaust Fan RPM}
+    base_mode_code: {name: Base Mode Code}
+    active_mode_code: {name: Active Mode Code}
+  - platform: template
+    name: RS485 Packets Received
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: return id(erv).get_packets_received();
+  - platform: template
+    name: RS485 Valid Packets
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: return id(erv).get_valid_packets();
+  - platform: template
+    name: RS485 Invalid Packets
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: return id(erv).get_invalid_packets();
+  - platform: template
+    name: RS485 Checksum Failures
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: return id(erv).get_checksum_failures();
+  - platform: template
+    name: RS485 Unknown Registers
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: return id(erv).get_unknown_registers();
+  - platform: template
+    name: RS485 Last Valid Packet Age
+    entity_category: diagnostic
+    unit_of_measurement: s
+    update_interval: 10s
+    lambda: return id(erv).get_last_valid_packet_age();
+
+text_sensor:
+  - platform: broan
+    fault_code: {name: Fault Code}
+    warning_code: {name: Warning Code}
+    last_fault: {name: Last Fault}
+    active_mode: {name: Active Mode}
+    base_mode: {name: Base Mode}
+    model: {name: Model}
+    firmware: {name: Firmware}
+    firmware_version: {name: Firmware Version}
+    hardware_revision: {name: Hardware Revision}
+
+binary_sensor:
+  - platform: broan
+    fault_active: {name: Fault Active}
+    communication_ok: {name: RS485 Communication}
+  - platform: status
+    name: Device Online
+
+button:
+  - platform: restart
+    name: Restart Monitor

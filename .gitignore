@@ -1,1 +1,9 @@
 *.pyc
+.venv/
+.scratch/
+.platformio/
+examples/.esphome/
+examples/secrets.yaml
+__pycache__/
+.pytest_cache/
+tests/build/

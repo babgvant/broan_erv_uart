@@ -49,12 +49,19 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_BASE_MODE): text_sensor.text_sensor_schema(
             icon="mdi:fan",
         ),
+        cv.Optional("last_fault"): text_sensor.text_sensor_schema(
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            icon="mdi:alert-circle",
+        ),
     }
 )
 
 
 async def to_code(config):
     broan_component = await cg.get_variable(config[CONF_BROAN_ID])
+    if "last_fault" in config:
+        s = await text_sensor.new_text_sensor(config["last_fault"])
+        cg.add(broan_component.set_last_fault_text_sensor(s))
 
     if model_config := config.get(CONF_MODEL):
         s = await text_sensor.new_text_sensor(model_config)

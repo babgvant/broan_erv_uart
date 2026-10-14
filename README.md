@@ -4,6 +4,14 @@ An ESP32 component to communicate with Broan, Nutone, Venmar, and VanEE ERVs via
 
 The protocol is documented [here](https://spitko.net/2025/08/08/Reverse-Engineering-an-ERV/)
 
+## Passive monitoring
+
+This fork adds `passive_mode: true` for observing an existing VTTOUCH without joining the controller exchange. The default remains the original active controller mode. Passive mode requires an RX-only UART and ignores all control methods.
+
+Use the complete [ADU Waveshare example](examples/adu-broan-erv.yaml), after completing the required [receive-only hardware modification and wiring checks](docs/wiring.md). The stock board's direction GPIO does not guarantee electrical silence during boot or failure. The coexistence and controller-power warnings in the original requirements below apply to **active controller replacement**, rather than passive observation.
+
+See [protocol and architecture](docs/protocol.md), [entities and freshness](docs/entities.md), [validation and traffic capture](docs/validation.md), and [Home Assistant alerts](examples/home-assistant-package.yaml). Candidate telemetry appears only when the existing ERV traffic carries it; VTTOUCH polling and E38 availability still require field captures.
+
 Currently this project is stable, but may be missing some advanced features from certain models. If there is a feature you'd like added, please open an issue. We may need packet capture from a unit with this functionality.
 
 <table>

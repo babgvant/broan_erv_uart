@@ -10,19 +10,18 @@ void BroanComponent::setup()
 	Component::setup();
 	//esp_log_level_set("broan", ESP_LOG_DEBUG);
 
-	m_vecHeader.reserve(5);
 
 	for( int i=0; i<BroanField::MAX_FIELDS; i++ )
 		m_vecFields[i].markDirty();
 
-  	if(flow_control_pin_)
+    if(flow_control_pin_ && !passive_mode_)
     	this->flow_control_pin_->setup();
 
 	// Initial state
 #ifdef USE_TEXT_SENSOR
-	if( warning_code_text_sensor_ )
+	if( !passive_mode_ && warning_code_text_sensor_ )
 		warning_code_text_sensor_->publish_state("OK");
-	if( fault_code_text_sensor_ )
+	if( !passive_mode_ && fault_code_text_sensor_ )
 		fault_code_text_sensor_->publish_state("OK");
 #endif
 }
@@ -30,21 +29,33 @@ void BroanComponent::setup()
 
 void BroanComponent::loop()
 {
-	while ( true )
-	{
-		if( !readHeader() ) break;
-		bool bRead = readMessage();
-		if( !bRead ) break;
-	}
-
-	replyIfAllowed();
-
-	runTasks();
+  auto receive = [this](uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload) {
+    last_valid_packet_ = millis();
+    have_valid_packet_ = true;
+    if (log_packets_) {
+      std::vector<uint8_t> packet{1, target, sender, 1, static_cast<uint8_t>(payload.size())};
+      packet.insert(packet.end(), payload.begin(), payload.end());
+      packet.push_back(packet_checksum(sender, target, payload));
+      packet.push_back(4);
+      ESP_LOGI("broan", "RX %02X -> %02X %s: %s", sender, target,
+               payload[0] == 0x20 ? "request" : payload[0] == 0x21 ? "response" : "message",
+               format_hex_pretty(packet).c_str());
+    }
+    handleMessage(sender, target, payload);
+  };
+  framer_.expire(millis(), receive);
+  uint8_t byte;
+  while (available() && read_byte(&byte)) framer_.feed(byte, millis(), receive);
+  if (passive_mode_) updateFreshness();
+  else {
+    replyIfAllowed();
+    runTasks();
+  }
 }
 
 void BroanComponent::dump_config()
 {
-	ESP_LOGCONFIG("broan", "Broan:");
+	ESP_LOGCONFIG("broan", "Broan: %s", passive_mode_ ? "passive" : "active");
 	if(flow_control_pin_)
 	{
 		char buffer[255];
@@ -59,47 +70,10 @@ float BroanComponent::get_setup_priority() const
   return setup_priority::BUS - 1.0f;
 }
 
-bool BroanComponent::readHeader()
-{
-	if( m_bHaveHeader )
-	{
-		//ESP_LOGD("broan", "Recycling header (good)");
-		return true;
-	}
-
-	if( available() < 5 )
-		return false;
-
-	for (uint8_t i = 0; i < 5; i++) {
-		m_vecHeader[i] = read();
-		if( i == 0 && m_vecHeader[i] != 0x01 )
-		{
-			ESP_LOGW("broan", "Alignment: Unexpected %02X in position %i", m_vecHeader[i], i);
-			return false;
-		}
-
-		if( i == 3 && m_vecHeader[i] != 0x01 )
-		{
-			ESP_LOGW("broan", "Alignment: Unexpected %02X in position %i", m_vecHeader[i], i);
-			return false;
-		}
-	}
-
-	uint8_t head = m_vecHeader[0];
-	if ( m_vecHeader[1] > 32 || m_vecHeader[2] > 32 )
-	{
-		ESP_LOGW("broan", "Alignment: Unexpected %02X %02X %02X %02X %02X",
-			m_vecHeader[0], m_vecHeader[1], m_vecHeader[2], m_vecHeader[3], m_vecHeader[4]);
-		return false;
-	}
-
-	m_bHaveHeader = true;
-
-	return true;
-}
-
 void BroanComponent::writeRegisters( const std::vector<BroanField_t> &values )
 {
+	if (passive_mode_) return;
+
 	std::vector<uint8_t> message;
 
 	message.push_back(0x40); // Write
@@ -115,56 +89,6 @@ void BroanComponent::writeRegisters( const std::vector<BroanField_t> &values )
 	}
 
 	queueMessage( message );
-}
-
-bool BroanComponent::readMessage()
-{
-	uint8_t target = m_vecHeader[1];
-	uint8_t sender = m_vecHeader[2];
-	int len = m_vecHeader[4];
-
-	if( !m_bHaveHeader )
-		return false;
-
-	if( available() < len + 2 )
-	{
-		//ESP_LOGD("broan", "Waiting for rest of packet to show up in buffer (Want %i have %i)", len + 2, available() );
-		return false;
-	}
-
-	m_bHaveHeader = false;
-
-	std::vector<uint8_t> message(len);
-
-	for (uint8_t i = 0; i < len; i++)
-	{
-		if (!available())
-		{
-			ESP_LOGE("broan", "Exhausted ring buffer somehow");
-			return false;
-		}
-
-		message[i] = read();
-	}
-
-	uint8_t checksum = read();
-	uint8_t expected_checksum = calculateChecksum(sender, target, message);
-	if (checksum != expected_checksum)
-	{
-		ESP_LOGE("broan", "Checksum mismatch: got %02X, expected %02X", checksum, expected_checksum);
-		return false;
-	}
-
-	uint8_t footer = read();
-	if (footer != 0x04)
-	{
-		ESP_LOGE("broan", "Missing 0x04 footer, incomplete read??");
-		return false;
-	}
-
-	handleMessage(sender, target, message);
-
-	return true;
 }
 
 void esp_log_vector_hex(const char* tag, const std::vector<uint8_t>& message) {
@@ -190,6 +114,18 @@ void esp_log_vector_hex(const char* tag, const std::vector<uint8_t>& message) {
 
 void BroanComponent::handleMessage(uint8_t sender, uint8_t target, const std::vector<uint8_t>& message)
 {
+  if (message.empty()) return;
+  if (passive_mode_) {
+    if (target == m_nServerAddress && message[0] == 0x20 && (message.size() - 1) % 2 == 0) {
+      for (size_t i = 1; i + 1 < message.size(); i += 2)
+        observeRegister((message[i] << 8) | message[i + 1], true);
+    }
+    // Read responses carry their own register IDs, lengths and values.
+    // Only ERV-originated data is telemetry; writes are commanded values.
+    if (sender == m_nServerAddress && message[0] == 0x21) parseBroanFields(message);
+    return;
+  }
+
 	if( target == m_nServerAddress )
 	{
 		if( message[0] == 0x03 )
@@ -236,7 +172,7 @@ void BroanComponent::handleMessage(uint8_t sender, uint8_t target, const std::ve
 		case 0x41:
 		{
 			// set register ACK, mark all fields dirty
-			for( int i=1; i<message.size(); i+=2)
+			for( int i=1; i+1<message.size(); i+=2)
 			{
 				BroanField_t *pField = lookupField(message[i], message[i+1]);
 				if( !pField )
@@ -275,6 +211,8 @@ void BroanComponent::handleMessage(uint8_t sender, uint8_t target, const std::ve
 
 void BroanComponent::replyIfAllowed()
 {
+	if (passive_mode_) return;
+
 	uint32_t time = millis();
 	if( m_nLastHadControl + CONTROL_TIMEOUT < time )
 	{
@@ -309,6 +247,8 @@ void BroanComponent::replyIfAllowed()
 
 void BroanComponent::queueMessage(std::vector<uint8_t>& message)
 {
+	if (passive_mode_) return;
+
 	if( m_vecSendQueue.size() > 20 )
 	{
 		ESP_LOGW("broan","Dropping queued message: Stack is full. (Tried to queue %02X)",message[0]);
@@ -320,8 +260,25 @@ void BroanComponent::queueMessage(std::vector<uint8_t>& message)
 
 void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 {
+  if (!valid_register_payload(message)) {
+    ESP_LOGD("broan", "Malformed register response");
+    return;
+  }
+  // Validate the entire response before publishing any of it.
+  for (size_t i = 1; i < message.size();) {
+    const auto *field = lookupField(message[i], message[i + 1]);
+    const uint8_t len = message[i + 2];
+    if (field && ((field->m_nType == BroanFieldType::Byte && len != 1) ||
+                  ((field->m_nType == BroanFieldType::Int || field->m_nType == BroanFieldType::Float) && len != 4) ||
+                  (field->m_nType == BroanFieldType::Void && len != 0) ||
+                  ((field == &m_vecFields[FirmwareVersion] || field == &m_vecFields[HardwareRevision]) && len < 3))) {
+      ESP_LOGD("broan", "Unexpected register length");
+      return;
+    }
+    i += 3 + len;
+  }
+
     size_t i = 1;
-	bool bPublish = false;
 
 	std::string strBuf;
 
@@ -336,8 +293,15 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 		i += len;
 
 		uint32_t unField = lookupFieldIndex(nOpcodeHigh, nOpcodeLow);
-		if( unField == INVALID_FIELD )
-			continue;
+        observeRegister(nOpcode, false);
+        if (unField == INVALID_FIELD) {
+            ++unknown_registers_;
+            if (log_unknown_registers_) handleUnknownField(nOpcodeHigh, nOpcodeLow, len, nDataPos, message);
+            continue;
+        }
+        received_at_[unField] = millis();
+        field_seen_[unField] = true;
+        field_stale_[unField] = false;
 
 		BroanField_t *pField = &m_vecFields[unField];
 		if( !pField )
@@ -352,15 +316,24 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				strBuf.assign( reinterpret_cast<const char*>(message.data() + nDataPos), len );
 			break;
 			default: 
-				uint32_t oldVal = pField->m_value.m_nValue;
 				for (size_t b = 0; b < len; ++b)
 					pField->m_value.m_rgBytes[b] = static_cast<char>(message[nDataPos+b]);
 			
-				if( oldVal == pField->m_value.m_nValue )
-					continue;
+
 		}
 
 		
+#ifdef USE_SENSOR
+        if (unField == BroanField::FaultCode && fault_code_sensor_)
+            fault_code_sensor_->publish_state(static_cast<int32_t>(pField->m_value.m_nValue));
+        if (unField == BroanField::WarningCode && warning_code_sensor_)
+            warning_code_sensor_->publish_state(static_cast<int32_t>(pField->m_value.m_nValue));
+        if (unField == BroanField::BaseMode && base_mode_code_sensor_)
+            base_mode_code_sensor_->publish_state(pField->m_value.m_nValue);
+        if (unField == BroanField::ActiveMode && active_mode_code_sensor_)
+            active_mode_code_sensor_->publish_state(pField->m_value.m_nValue);
+#endif
+
 		switch(unField)
 		{
 #ifdef USE_SELECT
@@ -402,7 +375,7 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 					continue;
 
 				// Seconds -> Days
-				filter_life_sensor_->publish_state(pField->m_value.m_nValue / ( 60 * 60 * 24 ) );
+				filter_life_sensor_->publish_state(pField->m_value.m_nValue / 86400.0f );
 			break;
 
 			case BroanField::TemperatureIn:
@@ -443,7 +416,7 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 			case BroanField::TemperatureOut:
 			{
 				// @todo: We should stop querying NaN fields...
-				if( !temperature_out_sensor_ || std::isnan( pField->m_value.m_flValue ) )
+				if( !temperature_out_sensor_ )
 					continue;
 
 				temperature_out_sensor_->publish_state(pField->m_value.m_flValue);		
@@ -499,7 +472,7 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 						continue;
 
 				char buf[12];
-				snprintf( buf, sizeof(buf), "%u.%u.%u", strBuf[0], strBuf[1], strBuf[2] );
+				snprintf( buf, sizeof(buf), "%u.%u.%u", static_cast<uint8_t>(strBuf[0]), static_cast<uint8_t>(strBuf[1]), static_cast<uint8_t>(strBuf[2]) );
 				
 				firmware_version_text_sensor_->publish_state(buf);
 			}
@@ -516,7 +489,7 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 						continue;
 				
 				char buf[12];
-				snprintf( buf, sizeof(buf), "%u.%u.%u", strBuf[0], strBuf[1], strBuf[2] );
+				snprintf( buf, sizeof(buf), "%u.%u.%u", static_cast<uint8_t>(strBuf[0]), static_cast<uint8_t>(strBuf[1]), static_cast<uint8_t>(strBuf[2]) );
 
 				hardware_revision_text_sensor_->publish_state(buf);
 			}
@@ -533,29 +506,27 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 					break;
 				}
 				
-				char buf[6];
+				char buf[32];
 				snprintf( buf, sizeof(buf), "W%u", pField->m_value.m_nValue );
 
 				warning_code_text_sensor_->publish_state(buf);
 			}
 			break;
-			case BroanField::FaultCode: 
-			{
-				if( !fault_code_text_sensor_ )
-						continue;
-
-				if( pField->m_value.m_nValue == -1 )
-				{
-					fault_code_text_sensor_->publish_state("OK");
-					break;
-				}
-				
-				char buf[6];
-				snprintf( buf, sizeof(buf), "E%u", pField->m_value.m_nValue );
-
-				fault_code_text_sensor_->publish_state(buf);
-			}
-			break;
+            case BroanField::FaultCode:
+            {
+                const uint32_t code = pField->m_value.m_nValue;
+                const bool active = code != 0xFFFFFFFF;
+                char buf[32];
+                snprintf(buf, sizeof(buf), "E%u", static_cast<unsigned>(code));
+                if (fault_code_text_sensor_) fault_code_text_sensor_->publish_state(active ? buf : "OK");
+                if (active && code != last_fault_value_ && last_fault_text_sensor_) {
+                    char retained[80];
+                    snprintf(retained, sizeof(retained), "%s at boot + %us", buf, static_cast<unsigned>(millis() / 1000));
+                    last_fault_text_sensor_->publish_state(retained);
+                }
+                last_fault_value_ = code;
+            }
+            break;
 
 			case BroanField::BaseMode: 
 				if( !base_mode_text_sensor_ )
@@ -576,6 +547,10 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 			break;
 #endif
 		}
+#ifdef USE_BINARY_SENSOR
+        if (unField == BroanField::FaultCode && fault_active_binary_sensor_)
+            fault_active_binary_sensor_->publish_state(pField->m_value.m_nValue != 0xFFFFFFFF);
+#endif
 		// This is no longer useful outside of development, ifdefing out.
 		switch( pField->m_nType )
 		{
@@ -651,6 +626,8 @@ void BroanComponent::handleUnknownField(uint32_t nOpcodeHigh, uint32_t nOpcodeLo
 
 void BroanComponent::send(const std::vector<uint8_t>& vecMessage)
 {
+	if (passive_mode_) return;
+
 #ifndef LISTEN_ONLY
  	if(flow_control_pin_)
     	flow_control_pin_->digital_write(true);
@@ -676,9 +653,7 @@ void BroanComponent::send(const std::vector<uint8_t>& vecMessage)
 
 uint8_t BroanComponent::calculateChecksum(uint8_t sender, uint8_t receiver, const std::vector<uint8_t>& message)
 {
-	uint8_t total = 0x01 + sender + receiver + 0x01 + message.size();
-	for (uint8_t b : message) total += b;
-	return 0xFF & (0 - (total - 1));
+	return packet_checksum(sender, receiver, message);
 }
 
 BroanField_t* BroanComponent::lookupField( uint8_t opcodeHigh, uint8_t opcodeLow )
@@ -706,6 +681,8 @@ uint32_t BroanComponent::lookupFieldIndex( uint8_t opcodeHigh, uint8_t opcodeLow
 
 void BroanComponent::runTasks()
 {
+	if (passive_mode_) return;
+
 	uint32_t time = millis();
 
 	if( m_bERVReady )

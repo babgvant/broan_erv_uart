@@ -1,0 +1,171 @@
+# Merge as a Home Assistant package; verify entity IDs against your registry.
+# persistent_notification creates dashboard notifications. Replace actions with
+# your mobile notify service if desired. Fan alerts start disabled for commissioning.
+input_boolean:
+  adu_erv_fan_alerts_enabled:
+    name: ADU ERV Fan Alerts Commissioned
+    initial: false
+
+input_text:
+  adu_erv_last_fault_snapshot:
+    name: ADU ERV Retained Last Fault
+    max: 255
+input_datetime:
+  adu_erv_last_fault_observed:
+    name: ADU ERV Last Fault Observed
+    has_date: true
+    has_time: true
+
+template:
+  - sensor:
+      - name: ADU ERV Exhaust RPM Fresh
+        unique_id: adu_erv_exhaust_rpm_fresh
+        unit_of_measurement: RPM
+        availability: "{{ has_value('sensor.adu_erv_exhaust_fan_rpm') }}"
+        state: "{{ states('sensor.adu_erv_exhaust_fan_rpm') }}"
+      - name: ADU ERV Supply RPM Fresh
+        unique_id: adu_erv_supply_rpm_fresh
+        unit_of_measurement: RPM
+        availability: "{{ has_value('sensor.adu_erv_supply_fan_rpm') }}"
+        state: "{{ states('sensor.adu_erv_supply_fan_rpm') }}"
+      - name: ADU ERV Fault Fresh
+        unique_id: adu_erv_fault_fresh
+        availability: >-
+          {{ has_value('sensor.adu_erv_fault_code') and
+             states('sensor.adu_erv_fault_code') != 'Unknown' }}
+        state: "{{ states('sensor.adu_erv_fault_code') }}"
+      - name: ADU ERV Active Mode Fresh
+        unique_id: adu_erv_active_mode_fresh
+        availability: >-
+          {{ has_value('sensor.adu_erv_active_mode') and
+             states('sensor.adu_erv_active_mode') != 'Unknown' }}
+        state: "{{ states('sensor.adu_erv_active_mode') }}"
+
+automation:
+  - id: adu_erv_record_last_fault
+    alias: ADU ERV retain fault observation
+    triggers:
+      - trigger: state
+        entity_id: sensor.adu_erv_last_fault
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ trigger.to_state is not none and
+             trigger.to_state.state is match('^E[0-9]+ at boot') and
+             trigger.to_state.state != states('input_text.adu_erv_last_fault_snapshot') }}
+    actions:
+      - action: input_text.set_value
+        target: {entity_id: input_text.adu_erv_last_fault_snapshot}
+        data:
+          value: "{{ trigger.to_state.state }}"
+      - action: input_datetime.set_datetime
+        target: {entity_id: input_datetime.adu_erv_last_fault_observed}
+        data:
+          timestamp: "{{ now().timestamp() }}"
+    mode: queued
+
+  - id: adu_erv_active_fault
+    alias: ADU ERV active fault
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.adu_erv_fault_active
+        to: "on"
+    actions:
+      - action: persistent_notification.create
+        data:
+          notification_id: adu_erv_fault
+          title: ADU ERV fault
+          message: >-
+            ERV fault {{ states('sensor.adu_erv_fault_code') }} observed
+            at {{ now().isoformat() }}. Check the VTTOUCH and ventilation.
+
+  - id: adu_erv_exhaust_stopped
+    alias: ADU ERV unexpected exhaust fan stoppage
+    triggers:
+      - trigger: template
+        value_template: >-
+          {{ is_state('input_boolean.adu_erv_fan_alerts_enabled', 'on') and
+             is_state('binary_sensor.adu_erv_rs485_communication', 'on') and
+             states('sensor.adu_erv_base_mode_code') | int(-1) in [9, 10, 11] and
+             states('sensor.adu_erv_active_mode_code') | int(-1) in [1, 2, 4] and
+             has_value('sensor.adu_erv_exhaust_fan_rpm') and
+             0 <= states('sensor.adu_erv_exhaust_fan_rpm') | float(-1) < 100 }}
+        for: "00:02:00"
+    actions:
+      - action: persistent_notification.create
+        data:
+          notification_id: adu_erv_exhaust_stopped
+          title: ADU ERV exhaust fan stopped
+          message: Fresh exhaust RPM is below 100 while a commissioned continuous mode is running.
+
+  - id: adu_erv_supply_stopped
+    alias: ADU ERV unexpected supply fan stoppage
+    triggers:
+      - trigger: template
+        value_template: >-
+          {{ is_state('input_boolean.adu_erv_fan_alerts_enabled', 'on') and
+             is_state('binary_sensor.adu_erv_rs485_communication', 'on') and
+             states('sensor.adu_erv_base_mode_code') | int(-1) in [9, 10, 11] and
+             states('sensor.adu_erv_active_mode_code') | int(-1) in [1, 2, 4] and
+             has_value('sensor.adu_erv_supply_fan_rpm') and
+             0 <= states('sensor.adu_erv_supply_fan_rpm') | float(-1) < 100 }}
+        for: "00:02:00"
+    actions:
+      - action: persistent_notification.create
+        data:
+          notification_id: adu_erv_supply_stopped
+          title: ADU ERV supply fan stopped
+          message: Fresh supply RPM is below 100 while a commissioned continuous mode is running.
+
+  - id: adu_erv_rs485_lost
+    alias: ADU ERV RS485 communication lost
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.adu_erv_rs485_communication
+        to: "off"
+        for: "00:01:00"
+    conditions:
+      - condition: state
+        entity_id: binary_sensor.adu_erv_device_online
+        state: "on"
+    actions:
+      - action: persistent_notification.create
+        data:
+          notification_id: adu_erv_rs485_lost
+          title: ADU ERV bus silent
+          message: Monitor is online but no valid RS485 packets arrived within the configured timeout.
+
+  - id: adu_erv_device_unavailable
+    alias: ADU ERV monitor unavailable
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.adu_erv_device_online
+        to: "unavailable"
+        for: "00:02:00"
+      - trigger: state
+        entity_id: binary_sensor.adu_erv_device_online
+        to: "off"
+        for: "00:02:00"
+    actions:
+      - action: persistent_notification.create
+        data:
+          notification_id: adu_erv_monitor_offline
+          title: ADU ERV monitor offline
+          message: The ESPHome monitor is unreachable. Check its supply and Wi-Fi; existing ventilation controls should remain independent.
+
+  - id: adu_erv_telemetry_missing
+    alias: ADU ERV fan telemetry missing
+    triggers:
+      - trigger: template
+        value_template: >-
+          {{ is_state('input_boolean.adu_erv_fan_alerts_enabled', 'on') and
+             is_state('binary_sensor.adu_erv_device_online', 'on') and
+             (not has_value('sensor.adu_erv_exhaust_fan_rpm') or
+              not has_value('sensor.adu_erv_supply_fan_rpm')) }}
+        for: "00:02:00"
+    actions:
+      - action: persistent_notification.create
+        data:
+          notification_id: adu_erv_telemetry_missing
+          title: ADU ERV telemetry missing
+          message: RPM data is missing or stale. Bus activity alone does not prove the ERV is responding.
