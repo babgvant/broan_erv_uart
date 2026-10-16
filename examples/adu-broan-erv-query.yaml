@@ -50,6 +50,7 @@ broan:
   uart_id: broan_uart
   passive_mode: false
   experimental_query: true
+  query_tolerant_mode: true
   query_source_address: 0x13
   flow_control_pin: GPIO21
   communication_timeout: 120s

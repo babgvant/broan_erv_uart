@@ -319,6 +319,7 @@ public:
 	void set_experimental_query(bool value) { experimental_query_ = value; }
 	void set_query_source_address(uint8_t value) { query_source_address_ = value; }
 	void set_query_allow_shared_address(bool value) { query_allow_shared_address_ = value; }
+	void set_query_tolerant_mode(bool value) { query_tolerant_mode_ = value; }
 	bool request_probe(uint16_t opcode);
 	void set_communication_timeout(uint32_t value) { communication_timeout_ = value; }
 	void set_sensor_timeout(uint32_t value) { sensor_timeout_ = value; }
@@ -347,19 +348,26 @@ private:
 	bool experimental_query_{false}, query_window_{false}, touch_yielded_{false}, query_sent_{false};
 	bool query_touch_request_{false}, query_recovered_{false};
 	bool query_allow_shared_address_{false}, touch_transaction_pending_{false};
+	bool query_tolerant_mode_{false}, query_reply_received_{false}, query_reply_late_{false};
+	uint32_t query_attempts_{0}, query_failures_{0}, query_resyncs_{0}, query_rtt_{0};
+	uint32_t query_checksum_baseline_{0}, query_reported_errors_{0}, query_last_touch_reply_{0};
 	uint8_t touch_reply_type_{0};
 	std::vector<uint16_t> touch_request_fields_;
 	uint8_t query_source_address_{0x13};
 	uint16_t query_opcode_{0};
 	QueryState query_state_{QueryState::IDLE};
 	HighFrequencyLoopRequester query_loop_;
-	uint32_t query_queued_at_{0}, query_sent_at_{0}, query_window_at_{0}, query_reply_at_{0};
+	uint32_t query_queued_at_{0}, query_sent_at_{0}, query_window_at_{0}, query_observe_at_{0};
 	uint32_t query_invalid_baseline_{0}, last_rx_byte_{0};
 	void updateProbe();
 	void observeProbe(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload);
 	bool observeTouchTransaction(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload);
 	void setProbeStatus(const char *status);
 	void lockProbe(const char *reason);
+	bool checkProbeErrors();
+	void handleProbeTimeout();
+	void logProbeResult(const char *result);
+	uint32_t probeReplyTimeout() const { return query_tolerant_mode_ ? 1500 : 500; }
 	bool passive_mode_{false}, log_packets_{false}, log_unknown_registers_{false}, register_discovery_{false};
 	uint32_t communication_timeout_{120000}, sensor_timeout_{300000};
 	PacketFramer framer_;

@@ -20,7 +20,12 @@ void BroanComponent::setup()
         this->flow_control_pin_->setup();
         if (experimental_query_) this->flow_control_pin_->digital_write(false);
     }
-    if (experimental_query_) setProbeStatus("Idle; manual probe required");
+    if (experimental_query_) {
+        char status[100];
+        snprintf(status, sizeof(status), "Idle; source 0x%02X; %s; manual probe required", query_source_address_,
+                 query_tolerant_mode_ ? "tolerant" : query_allow_shared_address_ ? "shared strict" : "strict");
+        setProbeStatus(status);
+    }
 
 	// Initial state
 #ifdef USE_TEXT_SENSOR

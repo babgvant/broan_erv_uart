@@ -6,11 +6,12 @@ struct ProbeFixture {
   text_sensor::TextSensor status;
   sensor::Sensor airflow;
   uint8_t source_address;
-  explicit ProbeFixture(uint32_t now = 100, bool shared = false) : source_address(shared ? 0x12 : 0x13) {
+  explicit ProbeFixture(uint32_t now = 100, bool shared = false, bool tolerant = false) : source_address(shared ? 0x12 : 0x13) {
     test_now = now;
     component.set_experimental_query(true);
     component.set_query_source_address(source_address);
     component.set_query_allow_shared_address(shared);
+    component.set_query_tolerant_mode(tolerant);
     component.set_flow_control_pin(&direction);
     component.set_query_status_text_sensor(&status);
     component.set_supply_cfm_sensor(&airflow);
