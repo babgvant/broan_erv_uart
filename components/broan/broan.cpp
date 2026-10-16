@@ -1,4 +1,5 @@
 #include "broan.h"
+#include <cinttypes>
 
 namespace esphome {
 namespace broan {
@@ -512,7 +513,7 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				}
 				
 				char buf[32];
-				snprintf( buf, sizeof(buf), "W%u", pField->m_value.m_nValue );
+				snprintf( buf, sizeof(buf), "W%" PRIu32, pField->m_value.m_nValue );
 
 				warning_code_text_sensor_->publish_state(buf);
 			}
@@ -563,7 +564,7 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				ESP_LOGD("broan","%02X%02X is now Byte %02X", nOpcodeHigh, nOpcodeLow, pField->m_value.m_chValue );
 				break;
 			case BroanFieldType::Int:
-				ESP_LOGD("broan","%02X%02X is now Int %i", nOpcodeHigh, nOpcodeLow, pField->m_value.m_nValue );
+				ESP_LOGD("broan","%02X%02X is now Int %" PRIu32, nOpcodeHigh, nOpcodeLow, pField->m_value.m_nValue );
 				break;
 			case BroanFieldType::Float:
 				ESP_LOGD("broan","%02X%02X is now Float %f", nOpcodeHigh, nOpcodeLow, pField->m_value.m_flValue );
@@ -594,11 +595,11 @@ void BroanComponent::handleUnknownField(uint32_t nOpcodeHigh, uint32_t nOpcodeLo
 
 
 			if( len == 4)
-				ESP_LOGD("broan","%02X%02X field is unmapped. Value: %f / %i -->  %f / %i", nOpcodeHigh, nOpcodeLow,
+				ESP_LOGD("broan","%02" PRIX32 "%02" PRIX32 " field is unmapped. Value: %f / %" PRIu32 " -->  %f / %" PRIu32, nOpcodeHigh, nOpcodeLow,
 					copy.m_value.m_flValue, copy.m_value.m_nValue,
 					m_vecFieldData[kv].m_value.m_flValue, m_vecFieldData[kv].m_value.m_nValue ) ;
 			else if (len == 1)
-				ESP_LOGD("broan","%02X%02X field is unmapped. Value: %f / %i -->  %f / %i", nOpcodeHigh, nOpcodeLow,
+				ESP_LOGD("broan","%02" PRIX32 "%02" PRIX32 " field is unmapped. Value: %f / %" PRIu32 " -->  %f / %" PRIu32, nOpcodeHigh, nOpcodeLow,
 					copy.m_value.m_flValue, copy.m_value.m_nValue,
 					m_vecFieldData[kv].m_value.m_flValue, m_vecFieldData[kv].m_value.m_nValue ) ;
 		}
@@ -616,11 +617,11 @@ void BroanComponent::handleUnknownField(uint32_t nOpcodeHigh, uint32_t nOpcodeLo
 
 
 		if( len == 4)
-			ESP_LOGD("broan","%02X%02X field is unmapped. Value: %f / %i", nOpcodeHigh, nOpcodeLow, newField.m_value.m_flValue, newField.m_value.m_nValue );
+			ESP_LOGD("broan","%02" PRIX32 "%02" PRIX32 " field is unmapped. Value: %f / %" PRIu32, nOpcodeHigh, nOpcodeLow, newField.m_value.m_flValue, newField.m_value.m_nValue );
 		else if( len == 1 )
-			ESP_LOGD("broan","%02X%02X field is unmapped. Value: %i", nOpcodeHigh, nOpcodeLow, newField.m_value.m_chValue);
+			ESP_LOGD("broan","%02" PRIX32 "%02" PRIX32 " field is unmapped. Value: %i", nOpcodeHigh, nOpcodeLow, newField.m_value.m_chValue);
 		else
-			ESP_LOGD("broan","%02X%02X has unhandled field length %i: %s", nOpcodeHigh, nOpcodeLow, len, format_hex_pretty(&message[i], len).c_str() );
+			ESP_LOGD("broan","%02" PRIX32 "%02" PRIX32 " has unhandled field length %i: %s", nOpcodeHigh, nOpcodeLow, len, format_hex_pretty(&message[i], len).c_str() );
 #ifdef SCAN_UNKNOWN
 		m_vecFieldData[kv] = newField;
 #endif
