@@ -23,7 +23,7 @@ void BroanComponent::setup()
     if (experimental_query_) {
         char status[100];
         snprintf(status, sizeof(status), "Idle; source 0x%02X; %s; manual probe required", query_source_address_,
-                 query_tolerant_mode_ ? "tolerant" : query_allow_shared_address_ ? "shared strict" : "strict");
+                 query_recovery_mode_ ? "shared recovery" : query_tolerant_mode_ ? "tolerant" : query_allow_shared_address_ ? "shared strict" : "strict");
         setProbeStatus(status);
         ESP_LOGI("broan_probe", "RS485 direction=%s", query_uart_direction_ ? "UART-managed" : "software GPIO");
     }

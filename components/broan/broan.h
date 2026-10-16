@@ -321,10 +321,12 @@ public:
 	void set_query_source_address(uint8_t value) { query_source_address_ = value; }
 	void set_query_allow_shared_address(bool value) { query_allow_shared_address_ = value; }
 	void set_query_tolerant_mode(bool value) { query_tolerant_mode_ = value; }
+	void set_query_recovery_mode(bool value) { query_recovery_mode_ = value; }
 	bool request_probe(uint16_t opcode, uint32_t idle_ms = 5, uint16_t after_phase = 0);
 	bool request_probe_after_phase(uint16_t opcode, uint16_t after_phase, uint32_t idle_ms = 5);
 	bool request_probe_with_release(uint16_t opcode, uint32_t idle_ms = 5);
 	bool start_probe_polling();
+	bool start_probe_trial();
 	void stop_probe_polling();
 	bool get_probe_polling() const { return query_polling_; }
 	void set_communication_timeout(uint32_t value) { communication_timeout_ = value; }
@@ -356,6 +358,11 @@ private:
 	bool query_touch_request_{false}, query_recovered_{false};
 	bool query_allow_shared_address_{false}, touch_transaction_pending_{false};
 	bool query_tolerant_mode_{false}, query_reply_received_{false}, query_reply_late_{false};
+	bool query_recovery_mode_{false}, query_trial_{false}, have_touch_control_{false};
+	uint8_t query_trial_remaining_{0}, touch_verified_reads_{0};
+	uint32_t touch_request_at_{0}, touch_control_at_{0};
+	uint32_t touch_mode_write_at_{0};
+	std::map<uint16_t, std::vector<uint8_t>> touch_mode_readback_;
 	uint32_t query_attempts_{0}, query_failures_{0}, query_resyncs_{0}, query_rtt_{0};
 	uint32_t query_checksum_baseline_{0}, query_reported_errors_{0}, query_last_touch_reply_{0};
 	uint32_t query_idle_ms_{5};
@@ -387,6 +394,9 @@ private:
 	void setProbeStatus(const char *status);
 	void lockProbe(const char *reason);
 	bool checkProbeErrors();
+	bool checkTouchWriteTimeout();
+	bool recoveryReady(bool require_quiet = true) const;
+	uint32_t probeInterval() const { return query_trial_ ? 15000 : 60000; }
 	void handleProbeTimeout();
 	void logProbeResult(const char *result);
 	uint32_t probeReplyTimeout() const { return query_tolerant_mode_ ? 1500 : 500; }

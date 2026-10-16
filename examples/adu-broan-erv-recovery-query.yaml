@@ -1,0 +1,17 @@
+packages:
+  query_base: !include adu-broan-erv-uart-query.yaml
+
+broan:
+  query_recovery_mode: true
+
+button:
+  - platform: template
+    name: Start Five Query Trial
+    entity_category: diagnostic
+    on_press:
+      - lambda: id(erv).start_probe_trial();
+  - platform: template
+    name: Stop Telemetry Trial
+    entity_category: diagnostic
+    on_press:
+      - lambda: id(erv).stop_probe_polling();

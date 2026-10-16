@@ -57,6 +57,7 @@ struct Fixture {
 #include "test_probe_shared.h"
 #include "test_probe_uart.h"
 #include "test_probe_phase.h"
+#include "test_probe_recovery.h"
 
 int main() {
   run_probe_tests();
@@ -66,6 +67,7 @@ int main() {
   run_shared_probe_tests();
   run_uart_probe_tests();
   run_phase_probe_tests();
+  run_recovery_probe_tests();
   {
     Fixture f;
     sensor::Sensor humidity, minutes;

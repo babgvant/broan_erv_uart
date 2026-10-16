@@ -7,6 +7,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.mark.parametrize("passive,pins,options,settings,valid", [
+    (False, "  tx_pin: GPIO17\n  flow_control_pin: GPIO21\n", "  experimental_query: true\n  query_uart_direction: true\n  query_source_address: 0x12\n  query_allow_shared_address: true\n  query_recovery_mode: true\n", "", True),
+    (False, "  tx_pin: GPIO17\n", "  experimental_query: true\n  flow_control_pin: GPIO21\n  query_source_address: 0x12\n  query_allow_shared_address: true\n  query_recovery_mode: true\n", "", True),
+    (False, "  tx_pin: GPIO17\n", "  experimental_query: true\n  flow_control_pin: GPIO21\n  query_recovery_mode: true\n", "", False),
+    (False, "  tx_pin: GPIO17\n", "  flow_control_pin: GPIO21\n  query_recovery_mode: true\n", "", False),
+    (False, "  tx_pin: GPIO17\n", "  experimental_query: true\n  flow_control_pin: GPIO21\n  query_source_address: 0x12\n  query_allow_shared_address: true\n  query_tolerant_mode: true\n  query_recovery_mode: true\n", "", False),
+    (True, "", "  query_recovery_mode: true\n", "", False),
     (True, "", "", "", True),
     (False, "  tx_pin: GPIO17\n", "", "", True),
     (False, "", "", "", False),

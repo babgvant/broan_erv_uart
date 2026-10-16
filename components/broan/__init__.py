@@ -32,6 +32,7 @@ CONFIG_SCHEMA = (
             cv.Optional("experimental_query", default=False): cv.boolean,
             cv.Optional("query_uart_direction", default=False): cv.boolean,
             cv.Optional("query_tolerant_mode", default=False): cv.boolean,
+            cv.Optional("query_recovery_mode", default=False): cv.boolean,
             cv.Optional("query_allow_shared_address", default=False): cv.boolean,
             cv.Optional("query_source_address", default=0x13): cv.All(
                 cv.hex_uint8_t, cv.Range(min=0x12, max=0x1F)),
@@ -53,6 +54,9 @@ BroanBaseSchema = cv.Schema(
 )
 
 def FINAL_VALIDATE_SCHEMA(config):
+    if config["query_recovery_mode"] and (not config["experimental_query"] or
+            not config["query_allow_shared_address"] or config["query_tolerant_mode"]):
+        raise cv.Invalid("query_recovery_mode requires experimental_query with a shared source address and query_tolerant_mode: false")
     if config["query_uart_direction"] and not config["experimental_query"]:
         raise cv.Invalid("query_uart_direction requires experimental_query")
     if config["query_tolerant_mode"] and (not config["experimental_query"] or config["query_allow_shared_address"]):
@@ -100,7 +104,7 @@ async def to_code(config):
     for option in ("passive_mode", "communication_timeout", "sensor_timeout",
                    "log_packets", "log_unknown_registers", "register_discovery",
                    "experimental_query", "query_source_address", "query_allow_shared_address", "query_tolerant_mode",
-                   "query_uart_direction"):
+                   "query_uart_direction", "query_recovery_mode"):
         cg.add(getattr(var, f"set_{option}")(config[option]))
 
     if CONF_FLOW_CONTROL_PIN in config:
