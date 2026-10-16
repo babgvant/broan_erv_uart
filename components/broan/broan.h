@@ -213,6 +213,7 @@ class BroanComponent : public Component, public uart::UARTDevice
 	SUB_TEXT_SENSOR(active_mode)
 	SUB_TEXT_SENSOR(base_mode)
 	SUB_TEXT_SENSOR(last_fault)
+	SUB_TEXT_SENSOR(query_status)
 #endif
 
 #ifdef USE_BINARY_SENSOR
@@ -315,6 +316,9 @@ public:
 	// Setup
 	void set_flow_control_pin(GPIOPin *flow_control_pin) { this->flow_control_pin_ = flow_control_pin; }
 	void set_passive_mode(bool value) { passive_mode_ = value; }
+	void set_experimental_query(bool value) { experimental_query_ = value; }
+	void set_query_source_address(uint8_t value) { query_source_address_ = value; }
+	bool request_probe(uint16_t opcode);
 	void set_communication_timeout(uint32_t value) { communication_timeout_ = value; }
 	void set_sensor_timeout(uint32_t value) { sensor_timeout_ = value; }
 	void set_log_packets(bool value) { log_packets_ = value; }
@@ -338,6 +342,18 @@ public:
 	void setIntermittentPeriod( uint32_t period );
 
 private:
+	enum class QueryState { IDLE, QUEUED, WAITING, OBSERVING, LOCKED };
+	bool experimental_query_{false}, query_window_{false}, touch_yielded_{false}, query_sent_{false};
+	bool query_touch_request_{false}, query_recovered_{false};
+	uint8_t query_source_address_{0x13};
+	uint16_t query_opcode_{0};
+	QueryState query_state_{QueryState::IDLE};
+	uint32_t query_queued_at_{0}, query_sent_at_{0}, query_window_at_{0}, query_reply_at_{0};
+	uint32_t query_invalid_baseline_{0}, last_rx_byte_{0};
+	void updateProbe();
+	void observeProbe(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload);
+	void setProbeStatus(const char *status);
+	void lockProbe(const char *reason);
 	bool passive_mode_{false}, log_packets_{false}, log_unknown_registers_{false}, register_discovery_{false};
 	uint32_t communication_timeout_{120000}, sensor_timeout_{300000};
 	PacketFramer framer_;

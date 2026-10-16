@@ -1,0 +1,160 @@
+esphome:
+  name: adu-broan-erv
+  friendly_name: ADU ERV
+  min_version: 2026.9.1
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/babgvant/broan_erv_uart
+      ref: main
+    components: [broan]
+    refresh: always
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    encryption: {}
+
+logger:
+  baud_rate: 0
+  level: INFO
+  tx_buffer_size: 1024
+
+
+uart:
+  id: broan_uart
+  rx_pin: GPIO18
+  tx_pin: GPIO17
+  baud_rate: 38400
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  rx_buffer_size: 2048
+
+broan:
+  id: erv
+  uart_id: broan_uart
+  passive_mode: false
+  experimental_query: true
+  query_source_address: 0x13
+  flow_control_pin: GPIO21
+  communication_timeout: 120s
+  sensor_timeout: 300s
+  log_packets: true
+  log_unknown_registers: false
+  register_discovery: true
+
+sensor:
+  - platform: broan
+    power: {name: Power}
+    temperature: {name: Intake Temperature}
+    temperature_out: {name: Exhaust Temperature}
+    filter_life: {name: Filter Life}
+    supply_fan_cfm: {name: Supply Fan CFM}
+    exhaust_fan_cfm: {name: Exhaust Fan CFM}
+    supply_fan_rpm: {name: Supply Fan RPM}
+    exhaust_fan_rpm: {name: Exhaust Fan RPM}
+    base_mode_code: {name: Base Mode Code}
+    active_mode_code: {name: Active Mode Code}
+    humidity_target: {name: Humidity Target}
+    intermittent_on_time: {name: Intermittent On Time}
+  - platform: template
+    name: RS485 Packets Received
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: return id(erv).get_packets_received();
+  - platform: template
+    name: RS485 Valid Packets
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: return id(erv).get_valid_packets();
+  - platform: template
+    name: RS485 Invalid Packets
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: return id(erv).get_invalid_packets();
+  - platform: template
+    name: RS485 Checksum Failures
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: return id(erv).get_checksum_failures();
+  - platform: template
+    name: RS485 Unknown Registers
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: return id(erv).get_unknown_registers();
+  - platform: template
+    name: RS485 Last Valid Packet Age
+    entity_category: diagnostic
+    unit_of_measurement: s
+    update_interval: 10s
+    lambda: return id(erv).get_last_valid_packet_age();
+
+text_sensor:
+  - platform: broan
+    fault_code: {name: Fault Code}
+    warning_code: {name: Warning Code}
+    last_fault: {name: Last Fault}
+    query_status: {name: Experimental Query Status}
+    active_mode: {name: Active Mode}
+    base_mode: {name: Base Mode}
+    model: {name: Model}
+    firmware: {name: Firmware}
+    firmware_version: {name: Firmware Version}
+    hardware_revision: {name: Hardware Revision}
+
+binary_sensor:
+  - platform: broan
+    fault_active: {name: Fault Active}
+    fault_data_available: {name: Fault Data Available}
+    humidity_control_enabled: {name: Humidity Control Enabled}
+    communication_ok: {name: RS485 Communication}
+  - platform: status
+    name: API Connected
+
+web_server:
+  port: 80
+  version: 2
+
+button:
+  - platform: restart
+    name: Restart Monitor
+  - platform: template
+    name: "Probe Supply Airflow Once"
+    entity_category: diagnostic
+    on_press:
+      - lambda: id(erv).request_probe(0x0510);
+  - platform: template
+    name: "Probe Supply RPM Once"
+    entity_category: diagnostic
+    on_press:
+      - lambda: id(erv).request_probe(0x0310);
+  - platform: template
+    name: "Probe Exhaust RPM Once"
+    entity_category: diagnostic
+    on_press:
+      - lambda: id(erv).request_probe(0x0410);
+  - platform: template
+    name: "Probe Power Once"
+    entity_category: diagnostic
+    on_press:
+      - lambda: id(erv).request_probe(0x2350);
+  - platform: template
+    name: "Probe Current Fault Once"
+    entity_category: diagnostic
+    on_press:
+      - lambda: id(erv).request_probe(0x1700);

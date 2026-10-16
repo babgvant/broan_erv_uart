@@ -19,6 +19,9 @@ CONF_BASE_MODE = "base_mode"
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(CONF_BROAN_ID): cv.use_id(BroanComponent),
+        cv.Optional("query_status"): text_sensor.text_sensor_schema(
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
         cv.Optional(CONF_MODEL): text_sensor.text_sensor_schema(
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             icon="mdi:tag",
@@ -59,6 +62,9 @@ CONFIG_SCHEMA = cv.Schema(
 
 async def to_code(config):
     broan_component = await cg.get_variable(config[CONF_BROAN_ID])
+    if "query_status" in config:
+        s = await text_sensor.new_text_sensor(config["query_status"])
+        cg.add(broan_component.set_query_status_text_sensor(s))
     if "last_fault" in config:
         s = await text_sensor.new_text_sensor(config["last_fault"])
         cg.add(broan_component.set_last_fault_text_sensor(s))

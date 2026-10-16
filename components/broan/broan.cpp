@@ -16,13 +16,17 @@ void BroanComponent::setup()
 		m_vecFields[i].markDirty();
 
     if(flow_control_pin_ && !passive_mode_)
-    	this->flow_control_pin_->setup();
+    {
+        this->flow_control_pin_->setup();
+        if (experimental_query_) this->flow_control_pin_->digital_write(false);
+    }
+    if (experimental_query_) setProbeStatus("Idle; manual probe required");
 
 	// Initial state
 #ifdef USE_TEXT_SENSOR
-	if( !passive_mode_ && warning_code_text_sensor_ )
+	if( !passive_mode_ && !experimental_query_ && warning_code_text_sensor_ )
 		warning_code_text_sensor_->publish_state("OK");
-	if( !passive_mode_ && fault_code_text_sensor_ )
+	if( !passive_mode_ && !experimental_query_ && fault_code_text_sensor_ )
 		fault_code_text_sensor_->publish_state("OK");
 #endif
 }
@@ -42,12 +46,19 @@ void BroanComponent::loop()
                payload[0] == 0x20 ? "request" : payload[0] == 0x21 ? "response" : "message",
                format_hex_pretty(packet).c_str());
     }
+    if (experimental_query_ && !passive_mode_) observeProbe(sender, target, payload);
     handleMessage(sender, target, payload);
   };
   framer_.expire(millis(), receive);
   uint8_t byte;
-  while (available() && read_byte(&byte)) framer_.feed(byte, millis(), receive);
-  if (passive_mode_) updateFreshness();
+  while (available() && read_byte(&byte)) {
+    last_rx_byte_ = millis();
+    framer_.feed(byte, millis(), receive);
+  }
+  if (passive_mode_ || experimental_query_) {
+    updateFreshness();
+    if (experimental_query_ && !passive_mode_) updateProbe();
+  }
   else {
     replyIfAllowed();
     runTasks();
@@ -56,7 +67,7 @@ void BroanComponent::loop()
 
 void BroanComponent::dump_config()
 {
-	ESP_LOGCONFIG("broan", "Broan: %s", passive_mode_ ? "passive" : "active");
+	ESP_LOGCONFIG("broan", "Broan: %s", passive_mode_ ? "passive" : experimental_query_ ? "experimental query" : "active");
 	if(flow_control_pin_)
 	{
 		char buffer[255];
@@ -73,7 +84,7 @@ float BroanComponent::get_setup_priority() const
 
 void BroanComponent::writeRegisters( const std::vector<BroanField_t> &values )
 {
-	if (passive_mode_) return;
+	if (passive_mode_ || experimental_query_) return;
 
 	std::vector<uint8_t> message;
 
@@ -116,7 +127,7 @@ void esp_log_vector_hex(const char* tag, const std::vector<uint8_t>& message) {
 void BroanComponent::handleMessage(uint8_t sender, uint8_t target, const std::vector<uint8_t>& message)
 {
   if (message.empty()) return;
-  if (passive_mode_) {
+  if (passive_mode_ || experimental_query_) {
     if (target == m_nServerAddress && message[0] == 0x20 && (message.size() - 1) % 2 == 0) {
       for (size_t i = 1; i + 1 < message.size(); i += 2)
         observeRegister((message[i] << 8) | message[i + 1], true);
@@ -212,7 +223,7 @@ void BroanComponent::handleMessage(uint8_t sender, uint8_t target, const std::ve
 
 void BroanComponent::replyIfAllowed()
 {
-	if (passive_mode_) return;
+	if (passive_mode_ || experimental_query_) return;
 
 	uint32_t time = millis();
 	if( m_nLastHadControl + CONTROL_TIMEOUT < time )
@@ -248,7 +259,7 @@ void BroanComponent::replyIfAllowed()
 
 void BroanComponent::queueMessage(std::vector<uint8_t>& message)
 {
-	if (passive_mode_) return;
+	if (passive_mode_ || experimental_query_) return;
 
 	if( m_vecSendQueue.size() > 20 )
 	{
@@ -595,7 +606,7 @@ void BroanComponent::handleUnknownField(uint32_t nOpcodeHigh, uint32_t nOpcodeLo
 
 void BroanComponent::send(const std::vector<uint8_t>& vecMessage)
 {
-	if (passive_mode_) return;
+	if (passive_mode_ || experimental_query_) return;
 
 #ifndef LISTEN_ONLY
  	if(flow_control_pin_)
@@ -650,7 +661,7 @@ uint32_t BroanComponent::lookupFieldIndex( uint8_t opcodeHigh, uint8_t opcodeLow
 
 void BroanComponent::runTasks()
 {
-	if (passive_mode_) return;
+	if (passive_mode_ || experimental_query_) return;
 
 	uint32_t time = millis();
 

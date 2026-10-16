@@ -6,7 +6,7 @@ namespace broan {
 
 void BroanComponent::setFanMode( std::string mode )
 {
-	if (passive_mode_) return;
+	if (passive_mode_ || experimental_query_) return;
 	uint8_t value = 0x01;
 
 	if( mode == "min")
@@ -40,7 +40,7 @@ void BroanComponent::setFanMode( std::string mode )
 
 void BroanComponent::setFanSpeed( float input )
 {
-	if (passive_mode_) return;
+	if (passive_mode_ || experimental_query_) return;
 	//return;
 	float flMin = m_vecFields[CFMIn_Min].m_value.m_flValue;
 	float flMax = m_vecFields[CFMIn_Max].m_value.m_flValue;
@@ -66,7 +66,7 @@ void BroanComponent::setFanSpeed( float input )
 
 void BroanComponent::setFanSpeedCFM( BroanFanMode mode, BroanCFMMode direction, float flTargetCFM )
 {
-	if (passive_mode_) return;
+	if (passive_mode_ || experimental_query_) return;
 	std::vector<BroanField_t> vecFields;
 
 
@@ -107,7 +107,7 @@ void BroanComponent::setFanSpeedCFM( BroanFanMode mode, BroanCFMMode direction, 
 // and if all this is necessary.
 void BroanComponent::resetFilter()
 {
-	if (passive_mode_) return;
+	if (passive_mode_ || experimental_query_) return;
 	uint32_t unNewFilterLife = FILTER_LIFE_MAX;
 
 	std::vector<BroanField_t> vecStage;
@@ -132,7 +132,7 @@ void BroanComponent::resetFilter()
 }
 
 void BroanComponent::setHumidityControl( bool enable ) {
-	if (passive_mode_) return;
+	if (passive_mode_ || experimental_query_) return;
 	std::vector<BroanField_t> vecFields;
 
 	uint8_t value = 0;
@@ -149,7 +149,7 @@ void BroanComponent::setHumidityControl( bool enable ) {
 }
 
 void BroanComponent::setHumiditySetpoint( float humidity ) {
-	if (passive_mode_) return;
+	if (passive_mode_ || experimental_query_) return;
 	std::vector<BroanField_t> vecFields;
 
 	vecFields.push_back( m_vecFields[TargetHumidityA].copyForUpdate( humidity ) );
@@ -162,7 +162,7 @@ void BroanComponent::setHumiditySetpoint( float humidity ) {
 }
 
 void BroanComponent::setCurrentHumidity( float humidity ) {
-	if (passive_mode_) return;
+	if (passive_mode_ || experimental_query_) return;
 	std::vector<BroanField_t> vecFields;
   
 	ESP_LOGI("broan_control", "Set current humidity: %0.1f%%", humidity);
@@ -174,7 +174,7 @@ void BroanComponent::setCurrentHumidity( float humidity ) {
 }
 
 void BroanComponent::setIntermittentPeriod( uint32_t period ) {
-	if (passive_mode_) return;
+	if (passive_mode_ || experimental_query_) return;
 	std::vector<BroanField_t> vecFields;
 
 	// S -> MS

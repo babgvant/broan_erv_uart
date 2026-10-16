@@ -9,7 +9,7 @@ BUILD = ROOT / "tests" / "build"
 BUILD.mkdir(exist_ok=True)
 SOURCES = [ROOT / "tests/test_component.cpp"] + [
     ROOT / "components/broan" / name
-    for name in ("broan.cpp", "broan_control.cpp", "broan_monitor.cpp")
+    for name in ("broan.cpp", "broan_control.cpp", "broan_monitor.cpp", "broan_probe.cpp")
 ]
 INCLUDES = [ROOT / "tests/stubs", ROOT / "components/broan"]
 

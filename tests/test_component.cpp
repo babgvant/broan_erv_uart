@@ -50,7 +50,10 @@ struct Fixture {
     component.loop();
   }
 };
+#include "test_probe.h"
+
 int main() {
+  run_probe_tests();
   {
     Fixture f;
     sensor::Sensor humidity, minutes;

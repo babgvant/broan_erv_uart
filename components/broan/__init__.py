@@ -29,6 +29,9 @@ CONFIG_SCHEMA = (
             cv.GenerateID(): cv.declare_id(BroanComponent),
             cv.Optional(CONF_FLOW_CONTROL_PIN): pins.gpio_output_pin_schema,
             cv.Optional("passive_mode", default=False): cv.boolean,
+            cv.Optional("experimental_query", default=False): cv.boolean,
+            cv.Optional("query_source_address", default=0x13): cv.All(
+                cv.hex_uint8_t, cv.Range(min=0x13, max=0x1F)),
             cv.Optional("communication_timeout", default="120s"): validate_timeout,
             cv.Optional("sensor_timeout", default="300s"): validate_timeout,
             cv.Optional("log_packets", default=False): cv.boolean,
@@ -47,6 +50,17 @@ BroanBaseSchema = cv.Schema(
 )
 
 def FINAL_VALIDATE_SCHEMA(config):
+    if config["experimental_query"]:
+        if config["passive_mode"]:
+            raise cv.Invalid("experimental_query cannot enable transmissions in passive_mode")
+        if CONF_FLOW_CONTROL_PIN not in config:
+            raise cv.Invalid("experimental_query requires a transmit flow_control_pin")
+        def manual_direction(hub):
+            if "flow_control_pin" in hub:
+                raise cv.Invalid("experimental_query uses broan.flow_control_pin, not UART flow control")
+            return hub
+        cv.Schema({cv.Required("uart_id"): fv.id_declaration_match_schema(manual_direction)},
+                  extra=cv.ALLOW_EXTRA)(config)
     if config["passive_mode"] and CONF_FLOW_CONTROL_PIN in config:
         raise cv.Invalid("passive_mode must not configure a transmit flow_control_pin")
     if config["passive_mode"]:
@@ -68,7 +82,8 @@ async def to_code(config):
 
     await uart.register_uart_device(var, config)
     for option in ("passive_mode", "communication_timeout", "sensor_timeout",
-                   "log_packets", "log_unknown_registers", "register_discovery"):
+                   "log_packets", "log_unknown_registers", "register_discovery",
+                   "experimental_query", "query_source_address"):
         cg.add(getattr(var, f"set_{option}")(config[option]))
 
     if CONF_FLOW_CONTROL_PIN in config:

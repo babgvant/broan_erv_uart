@@ -16,6 +16,7 @@ inline uint8_t packet_checksum(uint8_t sender, uint8_t target, const std::vector
 // Bounded incremental framing shared by active and passive transports.
 class PacketFramer {
  public:
+  bool has_pending_bytes() const { return !buffer_.empty(); }
   uint32_t packets{0}, valid{0}, invalid{0}, checksum_failures{0};
 
   template<typename Callback> void feed(uint8_t byte, uint32_t now, Callback callback) {
