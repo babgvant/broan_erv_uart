@@ -21,20 +21,89 @@ struct ProbeFixture {
     receive(component, 0x12, 0x10, {0x04});
     receive(component, 0x10, 0x12, {0x05});
   }
-  void send() {
+  void send(uint16_t opcode = 0x0510) {
     const unsigned starts = test_fast_loop_starts, stops = test_fast_loop_stops;
-    assert(component.request_probe(0x0510));
+    assert(component.request_probe(opcode));
     assert(test_fast_loop_starts == starts + 1);
     handoff();
     test_now += 5;
     component.loop();
-    assert(component.tx == frame(source_address, 0x10, {0x20, 0x05, 0x10}));
+    assert(component.tx == frame(source_address, 0x10,
+        {0x20, static_cast<uint8_t>(opcode >> 8), static_cast<uint8_t>(opcode)}));
     assert(component.flushes == 1 && direction.writes == 3);
     assert(test_fast_loop_stops == stops + 1);
   }
 };
 
 void run_probe_tests() {
+  {
+    ProbeFixture f;
+    sensor::Sensor rpm;
+    f.component.set_supply_rpm_sensor(&rpm);
+    f.send(0x0310);
+    receive(f.component, 0x10, 0x12, {0x04});
+    receive(f.component, 0x12, 0x10, {0x05});
+    receive(f.component, 0x12, 0x10, {0x20, 0x09, 0x50});
+    test_now += 100;
+    receive(f.component, 0x10, 0x13, value(0x03, 0x10, 1200));
+    assert(f.status.state == "Reply received; observing bus recovery");
+    assert(rpm.state == 1200 && std::isnan(f.airflow.state));
+    assert(f.component.tx == frame(0x13, 0x10, {0x20, 0x03, 0x10}));
+  }
+  {
+    ProbeFixture f;
+    f.send();
+    receive(f.component, 0x10, 0x12, {0x21, 0x09, 0x50, 4, 0});
+    assert(f.status.state.find("Locked: other traffic") == 0);
+  }
+  {
+    ProbeFixture f;
+    f.send();
+    test_now += 20;
+    receive(f.component, 0x10, 0x12, {0x04});
+    receive(f.component, 0x12, 0x10, {0x05});
+    receive(f.component, 0x12, 0x10, {0x20, 0x12, 0, 0x1A, 0, 0x01, 0xE0, 0x0A, 0xF0});
+    assert(f.status.state == "Read transmitted; waiting for response");
+    test_now += 118;
+    receive(f.component, 0x10, 0x13, {0x21, 0x05, 0x10, 4, 0x18, 1, 0x34, 0x42});
+    assert(f.status.state == "Reply received; observing bus recovery");
+    assert(std::abs(f.airflow.state - 45.001068f) < 0.0001f);
+    std::vector<uint8_t> normal{0x21, 0x0A, 0xF0, 120};
+    normal.resize(124, 0);
+    const auto temperature = value(0x01, 0xE0, 8.388311f);
+    normal.insert(normal.end(), temperature.begin() + 1, temperature.end());
+    normal.insert(normal.end(), {0x1A, 0, 4, 0, 0, 0, 0, 0x12, 0, 4, 255, 255, 255, 255});
+    receive(f.component, 0x10, 0x12, normal);
+    test_now += 1000;
+    receive(f.component, 0x10, 0x12, {0x04});
+    assert(f.status.state == "Reply received; bus traffic resumed; 60s cooldown");
+    assert(f.component.tx.size() == 10 && f.component.flushes == 1);
+  }
+  {
+    ProbeFixture f;
+    f.send();
+    receive(f.component, 0x12, 0x10, {0x40, 0x00, 0x50, 0});
+    receive(f.component, 0x10, 0x12, {0x41, 0x00, 0x50});
+    test_now += 499;
+    receive(f.component, 0x10, 0x12, {0x04});
+    assert(f.status.state == "Read transmitted; waiting for response");
+    test_now += 1;
+    receive(f.component, 0x10, 0x13, value(0x05, 0x10, 45));
+    assert(f.status.state.find("Locked: probe response timeout") == 0);
+    assert(!f.component.request_probe(0x0510) && f.component.tx.size() == 10);
+  }
+  {
+    ProbeFixture f;
+    f.send();
+    receive(f.component, 0x10, 0x14, value(0x05, 0x10, 45));
+    assert(f.status.state.find("Locked: other traffic") == 0);
+  }
+  {
+    ProbeFixture f;
+    f.send();
+    receive(f.component, 0x13, 0x10, {0x20, 0x04, 0x10});
+    assert(f.status.state.find("Locked: probe source address already in use") == 0);
+  }
   {
     ProbeFixture f;
     f.component.set_query_source_address(0x12);
@@ -259,14 +328,17 @@ void run_probe_tests() {
     ProbeFixture f;
     f.send();
     receive(f.component, 0x10, target, value(0x06, 0x10, 45));
-    assert(f.status.state.find("Locked: other traffic") == 0);
+    if (target == 0x12) assert(f.status.state == "Read transmitted; waiting for response");
+    else assert(f.status.state.find("Locked: other traffic") == 0);
     assert(!f.component.request_probe(0x0510));
   }
   {
     ProbeFixture f;
     f.send();
     receive(f.component, 0x10, 0x12, value(0x05, 0x10, 45));
-    assert(f.status.state.find("Locked: other traffic") == 0);
+    assert(f.status.state == "Read transmitted; waiting for response");
+    receive(f.component, 0x10, 0x13, value(0x05, 0x10, 45));
+    assert(f.status.state == "Reply received; observing bus recovery");
     assert(f.component.tx.size() == 10);
   }
   {

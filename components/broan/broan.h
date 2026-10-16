@@ -357,7 +357,7 @@ private:
 	uint32_t query_invalid_baseline_{0}, last_rx_byte_{0};
 	void updateProbe();
 	void observeProbe(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload);
-	void observeTouchTransaction(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload);
+	bool observeTouchTransaction(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload);
 	void setProbeStatus(const char *status);
 	void lockProbe(const char *reason);
 	bool passive_mode_{false}, log_packets_{false}, log_unknown_registers_{false}, register_discovery_{false};
