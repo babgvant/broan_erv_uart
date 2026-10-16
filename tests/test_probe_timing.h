@@ -24,10 +24,25 @@ void run_probe_timing_tests() {
     assert(f.component.request_probe(0x0510));
   }
   for (bool shared : {false, true}) {
-    ProbeFixture f(100, shared);
-    assert(!f.component.request_probe(0x0510, 1));
-    assert(!f.component.request_probe(0x0510, 3));
-    f.send();
+    for (bool uart_direction : {false, true}) {
+      for (uint32_t idle : {1U, 3U, 5U, 8U}) {
+        ProbeFixture f(100, shared, false, uart_direction);
+        assert(f.component.request_probe(0x0510, idle));
+        f.handoff();
+        test_now += idle - 1;
+        f.component.loop();
+        assert(f.component.tx.empty());
+        ++test_now;
+        f.component.loop();
+        assert(f.component.tx == frame(f.source_address, 0x10, {0x20, 0x05, 0x10}));
+        enqueue(f.component, {1, 0x22, 0x33, 0xFF, 2});
+        f.component.loop();
+        assert(f.status.state.find("Locked: framing errors") == 0);
+        test_now += 60000;
+        f.component.loop();
+        assert(f.component.tx.size() == 10 && !f.component.request_probe(0x0510, idle));
+      }
+    }
   }
   {
     TolerantFixture f;

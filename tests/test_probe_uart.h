@@ -80,4 +80,27 @@ void run_uart_probe_tests() {
     f.component.loop();
     assert(f.component.tx.size() == 18 && f.component.array_writes == 2 && f.direction.writes == 0);
   }
+  {
+    SharedFixture f(true);
+    assert(f.component.request_probe(0x0510, 1));
+    f.handoff();
+    ++test_now;
+    f.component.loop();
+    const uint32_t sent = test_now;
+    test_now += 50;
+    receive(f.component, 0x10, 0x12, value(0x05, 0x10, 45));
+    f.recover();
+    assert(f.component.start_probe_polling());
+    while (static_cast<uint32_t>(test_now - sent) < 60000) {
+      test_now += 1000;
+      f.normal();
+    }
+    f.handoff();
+    f.component.loop();
+    assert(f.component.tx.size() == 10);
+    ++test_now;
+    f.component.loop();
+    assert(f.component.tx.size() == 20 && f.direction.writes == 0);
+    f.component.stop_probe_polling();
+  }
 }

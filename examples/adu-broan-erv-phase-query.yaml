@@ -1,0 +1,24 @@
+packages:
+  query_base: !include adu-broan-erv-uart-query.yaml
+
+button:
+  - platform: template
+    name: Probe Airflow After 0020 Group
+    entity_category: diagnostic
+    on_press:
+      - lambda: id(erv).request_probe_after_phase(0x0510, 0x0020, 5);
+  - platform: template
+    name: Probe Airflow After 0030 Group
+    entity_category: diagnostic
+    on_press:
+      - lambda: id(erv).request_probe_after_phase(0x0510, 0x0030, 5);
+  - platform: template
+    name: Probe Airflow After 1250 Group
+    entity_category: diagnostic
+    on_press:
+      - lambda: id(erv).request_probe_after_phase(0x0510, 0x1250, 5);
+  - platform: template
+    name: Probe Supply RPM After 0020 Group
+    entity_category: diagnostic
+    on_press:
+      - lambda: id(erv).request_probe_after_phase(0x0310, 0x0020, 5);

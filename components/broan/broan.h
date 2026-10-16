@@ -321,7 +321,8 @@ public:
 	void set_query_source_address(uint8_t value) { query_source_address_ = value; }
 	void set_query_allow_shared_address(bool value) { query_allow_shared_address_ = value; }
 	void set_query_tolerant_mode(bool value) { query_tolerant_mode_ = value; }
-	bool request_probe(uint16_t opcode, uint32_t idle_ms = 5);
+	bool request_probe(uint16_t opcode, uint32_t idle_ms = 5, uint16_t after_phase = 0);
+	bool request_probe_after_phase(uint16_t opcode, uint16_t after_phase, uint32_t idle_ms = 5);
 	bool request_probe_with_release(uint16_t opcode, uint32_t idle_ms = 5);
 	bool start_probe_polling();
 	void stop_probe_polling();
@@ -358,6 +359,11 @@ private:
 	uint32_t query_attempts_{0}, query_failures_{0}, query_resyncs_{0}, query_rtt_{0};
 	uint32_t query_checksum_baseline_{0}, query_reported_errors_{0}, query_last_touch_reply_{0};
 	uint32_t query_idle_ms_{5};
+	uint32_t query_poll_idle_ms_{5};
+	uint16_t query_phase_filter_{0}, query_poll_phase_{0}, last_touch_phase_{0}, query_phase_at_send_{0};
+	bool query_phase_ready_{false};
+	uint32_t touch_read_serial_{0}, query_phase_read_baseline_{0}, last_touch_phase_at_{0};
+	uint32_t query_phase_matches_{0}, query_phase_skips_{0}, query_phase_age_at_send_{0};
 	uint32_t query_touch_grant_ms_{UINT32_MAX}, query_touch_request_ms_{UINT32_MAX}, query_touch_reply_ms_{UINT32_MAX};
 	bool query_release_enabled_{false}, query_release_pending_{false}, query_release_sent_{false}, query_release_ack_{false};
 	uint32_t query_release_at_{0}, query_release_ack_ms_{0};
