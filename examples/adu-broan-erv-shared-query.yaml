@@ -1,0 +1,6 @@
+packages:
+  query_base: !include adu-broan-erv-query.yaml
+
+broan:
+  query_source_address: 0x12
+  query_allow_shared_address: true

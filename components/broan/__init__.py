@@ -30,8 +30,9 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_FLOW_CONTROL_PIN): pins.gpio_output_pin_schema,
             cv.Optional("passive_mode", default=False): cv.boolean,
             cv.Optional("experimental_query", default=False): cv.boolean,
+            cv.Optional("query_allow_shared_address", default=False): cv.boolean,
             cv.Optional("query_source_address", default=0x13): cv.All(
-                cv.hex_uint8_t, cv.Range(min=0x13, max=0x1F)),
+                cv.hex_uint8_t, cv.Range(min=0x12, max=0x1F)),
             cv.Optional("communication_timeout", default="120s"): validate_timeout,
             cv.Optional("sensor_timeout", default="300s"): validate_timeout,
             cv.Optional("log_packets", default=False): cv.boolean,
@@ -50,6 +51,11 @@ BroanBaseSchema = cv.Schema(
 )
 
 def FINAL_VALIDATE_SCHEMA(config):
+    if config["query_allow_shared_address"]:
+        if not config["experimental_query"] or config["query_source_address"] != 0x12:
+            raise cv.Invalid("query_allow_shared_address requires experimental_query and query_source_address: 0x12")
+    elif config["query_source_address"] == 0x12:
+        raise cv.Invalid("query_source_address: 0x12 requires explicit query_allow_shared_address: true")
     if config["experimental_query"]:
         if config["passive_mode"]:
             raise cv.Invalid("experimental_query cannot enable transmissions in passive_mode")
@@ -83,7 +89,7 @@ async def to_code(config):
     await uart.register_uart_device(var, config)
     for option in ("passive_mode", "communication_timeout", "sensor_timeout",
                    "log_packets", "log_unknown_registers", "register_discovery",
-                   "experimental_query", "query_source_address"):
+                   "experimental_query", "query_source_address", "query_allow_shared_address"):
         cg.add(getattr(var, f"set_{option}")(config[option]))
 
     if CONF_FLOW_CONTROL_PIN in config:

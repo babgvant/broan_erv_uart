@@ -5,9 +5,12 @@ struct ProbeFixture {
   GPIOPin direction;
   text_sensor::TextSensor status;
   sensor::Sensor airflow;
-  explicit ProbeFixture(uint32_t now = 100) {
+  uint8_t source_address;
+  explicit ProbeFixture(uint32_t now = 100, bool shared = false) : source_address(shared ? 0x12 : 0x13) {
     test_now = now;
     component.set_experimental_query(true);
+    component.set_query_source_address(source_address);
+    component.set_query_allow_shared_address(shared);
     component.set_flow_control_pin(&direction);
     component.set_query_status_text_sensor(&status);
     component.set_supply_cfm_sensor(&airflow);
@@ -25,13 +28,118 @@ struct ProbeFixture {
     handoff();
     test_now += 5;
     component.loop();
-    assert(component.tx == frame(0x13, 0x10, {0x20, 0x05, 0x10}));
+    assert(component.tx == frame(source_address, 0x10, {0x20, 0x05, 0x10}));
     assert(component.flushes == 1 && direction.writes == 3);
     assert(test_fast_loop_stops == stops + 1);
   }
 };
 
 void run_probe_tests() {
+  {
+    ProbeFixture f;
+    f.component.set_query_source_address(0x12);
+    assert(!f.component.request_probe(0x0510) && f.component.tx.empty());
+  }
+  {
+    ProbeFixture f;
+    f.component.set_query_allow_shared_address(true);
+    assert(!f.component.request_probe(0x0510) && f.component.tx.empty());
+  }
+  {
+    ProbeFixture f(100, true);
+    receive(f.component, 0x12, 0x10, {0x20, 0x09, 0x50});
+    assert(f.component.request_probe(0x0510));
+    receive(f.component, 0x12, 0x10, {0x40, 0x00, 0x50, 0});
+    f.handoff();
+    test_now += 5;
+    f.component.loop();
+    assert(f.status.state.find("Locked: overlapping Touch transactions") == 0);
+    assert(f.component.tx.empty() && !f.component.request_probe(0x0510));
+  }
+  {
+    ProbeFixture f(100, true);
+    receive(f.component, 0x12, 0x10, {0x20, 0x09, 0x50, 0x08, 0x50});
+    assert(f.component.request_probe(0x0510));
+    f.handoff();
+    test_now += 5;
+    f.component.loop();
+    assert(f.component.tx.empty());
+    receive(f.component, 0x10, 0x12, {0x21, 0x09, 0x50, 4, 40, 0, 0, 0});
+    f.handoff();
+    test_now += 5;
+    f.component.loop();
+    assert(f.component.tx.empty());
+    receive(f.component, 0x10, 0x12, {0x21, 0x08, 0x50, 1, 1, 0x09, 0x50, 4, 40, 0, 0, 0});
+    f.handoff();
+    test_now += 5;
+    f.component.loop();
+    assert(f.component.tx == frame(0x12, 0x10, {0x20, 0x05, 0x10}));
+    receive(f.component, 0x10, 0x12, value(0x05, 0x10, 45));
+    assert(f.status.state == "Reply received; observing bus recovery" && f.airflow.state == 45);
+    test_now += 600;
+    receive(f.component, 0x12, 0x10, {0x20, 0x09, 0x50});
+    receive(f.component, 0x10, 0x12, {0x21, 0x08, 0x50, 1, 1});
+    test_now += 400;
+    f.component.loop();
+    assert(f.status.state.find("Locked: bus did not resume") == 0);
+  }
+  {
+    ProbeFixture f(100, true);
+    receive(f.component, 0x12, 0x10, {
+      0x40, 0x04, 0x50, 4, 0, 0, 0x70, 0x42, 0x05, 0x50, 4, 0, 0, 0xB8, 0x41});
+    receive(f.component, 0x10, 0x12, {0x41, 0x05, 0x50, 0x04, 0x50});
+    f.send();
+    assert(f.component.tx.size() == 10);
+  }
+  {
+    ProbeFixture f(100, true);
+    receive(f.component, 0x12, 0x10, {0x40, 0x00, 0x50, 0});
+    assert(f.component.request_probe(0x0510));
+    f.handoff();
+    test_now += 5;
+    f.component.loop();
+    assert(f.component.tx.empty());
+    receive(f.component, 0x10, 0x12, {0x41, 0x01, 0x30});
+    f.handoff();
+    test_now += 5;
+    f.component.loop();
+    assert(f.component.tx.empty());
+    receive(f.component, 0x10, 0x12, {0x41, 0x00, 0x50});
+    f.handoff();
+    test_now += 5;
+    f.component.loop();
+    assert(f.component.tx == frame(0x12, 0x10, {0x20, 0x05, 0x10}));
+    receive(f.component, 0x10, 0x12, value(0x05, 0x10, 45));
+    test_now += 600;
+    receive(f.component, 0x12, 0x10, {0x20, 0x09, 0x50});
+    receive(f.component, 0x10, 0x12, {0x21, 0x09, 0x50, 4, 40, 0, 0, 0});
+    test_now += 400;
+    f.component.loop();
+    assert(f.status.state == "Shared-address reply received; Touch traffic resumed; reboot before another probe");
+    test_now += 60000;
+    assert(!f.component.request_probe(0x0310) && f.component.tx.size() == 10);
+  }
+  {
+    ProbeFixture f(100, true);
+    f.send();
+    receive(f.component, 0x12, 0x10, {0x20, 0x05, 0x10});
+    assert(f.status.state.find("Locked: other traffic") == 0);
+    receive(f.component, 0x10, 0x12, value(0x05, 0x10, 45));
+    assert(f.status.state.find("Locked: other traffic") == 0 && f.component.tx.size() == 10);
+  }
+  {
+    ProbeFixture f(100, true);
+    f.send();
+    receive(f.component, 0x10, 0x12, {0x04});
+    assert(f.status.state.find("Locked: other traffic") == 0 && f.component.flushes == 1);
+  }
+  {
+    ProbeFixture f(100, true);
+    f.send();
+    test_now += 500;
+    f.component.loop();
+    assert(f.status.state.find("Locked: probe response timeout") == 0);
+  }
   {
     Fixture f;
     assert(!f.component.request_probe(0x0510));

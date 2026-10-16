@@ -318,6 +318,7 @@ public:
 	void set_passive_mode(bool value) { passive_mode_ = value; }
 	void set_experimental_query(bool value) { experimental_query_ = value; }
 	void set_query_source_address(uint8_t value) { query_source_address_ = value; }
+	void set_query_allow_shared_address(bool value) { query_allow_shared_address_ = value; }
 	bool request_probe(uint16_t opcode);
 	void set_communication_timeout(uint32_t value) { communication_timeout_ = value; }
 	void set_sensor_timeout(uint32_t value) { sensor_timeout_ = value; }
@@ -345,6 +346,9 @@ private:
 	enum class QueryState { IDLE, QUEUED, WAITING, OBSERVING, LOCKED };
 	bool experimental_query_{false}, query_window_{false}, touch_yielded_{false}, query_sent_{false};
 	bool query_touch_request_{false}, query_recovered_{false};
+	bool query_allow_shared_address_{false}, touch_transaction_pending_{false};
+	uint8_t touch_reply_type_{0};
+	std::vector<uint16_t> touch_request_fields_;
 	uint8_t query_source_address_{0x13};
 	uint16_t query_opcode_{0};
 	QueryState query_state_{QueryState::IDLE};
@@ -353,6 +357,7 @@ private:
 	uint32_t query_invalid_baseline_{0}, last_rx_byte_{0};
 	void updateProbe();
 	void observeProbe(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload);
+	void observeTouchTransaction(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload);
 	void setProbeStatus(const char *status);
 	void lockProbe(const char *reason);
 	bool passive_mode_{false}, log_packets_{false}, log_unknown_registers_{false}, register_discovery_{false};

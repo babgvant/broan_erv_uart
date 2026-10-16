@@ -1,4 +1,5 @@
 #include "broan.h"
+#include <algorithm>
 
 namespace esphome {
 namespace broan {
@@ -19,7 +20,8 @@ void BroanComponent::lockProbe(const char *reason) {
 
 bool BroanComponent::request_probe(uint16_t opcode) {
   if (!experimental_query_ || passive_mode_ || !flow_control_pin_ ||
-      query_source_address_ < 0x13 || query_source_address_ > 0x1F) return false;
+      query_source_address_ < 0x12 || query_source_address_ > 0x1F ||
+      ((query_source_address_ == 0x12) != query_allow_shared_address_)) return false;
   if (query_state_ != QueryState::IDLE) {
     ESP_LOGI("broan_probe", "Probe refused: pending or locked; no transmission");
     return false;
@@ -49,11 +51,12 @@ bool BroanComponent::request_probe(uint16_t opcode) {
 
 void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload) {
   if (query_state_ == QueryState::LOCKED) return;
-  if (target == query_source_address_ && query_state_ != QueryState::WAITING) {
+  if (query_allow_shared_address_) observeTouchTransaction(sender, target, payload);
+  if (!query_allow_shared_address_ && target == query_source_address_ && query_state_ != QueryState::WAITING) {
     lockProbe("Locked: unexpected traffic to probe address; reboot required");
     return;
   }
-  if (sender == query_source_address_) {
+  if (!query_allow_shared_address_ && sender == query_source_address_) {
     if (query_state_ == QueryState::WAITING && target == m_nServerAddress &&
         payload == std::vector<uint8_t>{0x20, static_cast<uint8_t>(query_opcode_ >> 8), static_cast<uint8_t>(query_opcode_)} &&
         static_cast<uint32_t>(millis() - query_sent_at_) < 10) return;
@@ -62,6 +65,7 @@ void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vec
   }
   if (query_state_ == QueryState::WAITING) {
     if (sender == m_nServerAddress && target == query_source_address_ &&
+        !touch_transaction_pending_ &&
         payload.size() == 8 && payload[0] == 0x21 && payload[3] == 4 &&
         payload[1] == (query_opcode_ >> 8) && payload[2] == (query_opcode_ & 0xFF)) {
       query_state_ = QueryState::OBSERVING;
@@ -78,7 +82,7 @@ void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vec
     if (sender == m_nClientAddress && target == m_nServerAddress &&
         payload.size() > 1 && payload[0] == 0x20 && (payload.size() - 1) % 2 == 0)
       query_touch_request_ = true;
-    if (query_touch_request_ && sender == m_nServerAddress && target == m_nClientAddress &&
+    if (query_touch_request_ && !touch_transaction_pending_ && sender == m_nServerAddress && target == m_nClientAddress &&
         payload[0] == 0x21 && valid_register_payload(payload))
       query_recovered_ = true;
     return;
@@ -88,8 +92,8 @@ void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vec
       payload.size() == 1 && payload[0] == 0x04;
   const bool acknowledge = touch_yielded_ && sender == m_nServerAddress && target == m_nClientAddress &&
       payload.size() == 1 && payload[0] == 0x05;
-  query_window_ = acknowledge;
-  if (acknowledge) query_window_at_ = millis();
+  query_window_ = acknowledge && !touch_transaction_pending_;
+  if (query_window_) query_window_at_ = millis();
   touch_yielded_ = release;
 }
 
@@ -111,8 +115,9 @@ void BroanComponent::updateProbe() {
       if (!query_recovered_ || !have_valid_packet_ || static_cast<uint32_t>(now - last_valid_packet_) >= 500) {
         lockProbe("Locked: bus did not resume after reply; reboot required");
       } else {
-        query_state_ = QueryState::IDLE;
-        setProbeStatus("Reply received; bus traffic resumed; 60s cooldown");
+        query_state_ = query_allow_shared_address_ ? QueryState::LOCKED : QueryState::IDLE;
+        setProbeStatus(query_allow_shared_address_ ? "Shared-address reply received; Touch traffic resumed; reboot before another probe" :
+                       "Reply received; bus traffic resumed; 60s cooldown");
       }
     }
     return;
@@ -123,7 +128,7 @@ void BroanComponent::updateProbe() {
     setProbeStatus("No eligible handoff in 30s; nothing transmitted");
     return;
   }
-  if (!query_window_ || static_cast<uint32_t>(now - query_window_at_) > 8 ||
+  if (!query_window_ || touch_transaction_pending_ || static_cast<uint32_t>(now - query_window_at_) > 8 ||
       static_cast<uint32_t>(now - last_rx_byte_) < 5 ||
       framer_.has_pending_bytes() || available()) return;
   std::vector<uint8_t> payload{0x20, static_cast<uint8_t>(query_opcode_ >> 8), static_cast<uint8_t>(query_opcode_)};
@@ -142,6 +147,43 @@ void BroanComponent::updateProbe() {
   flow_control_pin_->digital_write(false);
   ESP_LOGI("broan_probe", "TX single experimental read: %s", format_hex_pretty(packet).c_str());
   setProbeStatus("Read transmitted; waiting for response");
+}
+
+void BroanComponent::observeTouchTransaction(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload) {
+  if (sender == m_nClientAddress && target == m_nServerAddress &&
+      (payload[0] == 0x20 || payload[0] == 0x40)) {
+    if (touch_transaction_pending_) {
+      lockProbe("Locked: overlapping Touch transactions; reboot required");
+      return;
+    }
+    touch_transaction_pending_ = true;
+    touch_request_fields_.clear();
+    touch_reply_type_ = payload[0] == 0x20 ? 0x21 : 0x41;
+    if (payload[0] == 0x20) {
+      if (payload.size() <= 1 || (payload.size() - 1) % 2 != 0) return;
+      for (size_t i = 1; i + 1 < payload.size(); i += 2)
+        touch_request_fields_.push_back((payload[i] << 8) | payload[i + 1]);
+    } else {
+      if (payload.size() <= 1 || !valid_register_payload(payload)) return;
+      for (size_t i = 1; i < payload.size(); i += 3 + payload[i + 2])
+        touch_request_fields_.push_back((payload[i] << 8) | payload[i + 1]);
+    }
+    std::sort(touch_request_fields_.begin(), touch_request_fields_.end());
+  } else if (touch_transaction_pending_ && !touch_request_fields_.empty() &&
+             sender == m_nServerAddress && target == m_nClientAddress && payload[0] == touch_reply_type_) {
+    std::vector<uint16_t> response_fields;
+    if (payload[0] == 0x21) {
+      if (!valid_register_payload(payload)) return;
+      for (size_t i = 1; i < payload.size(); i += 3 + payload[i + 2])
+        response_fields.push_back((payload[i] << 8) | payload[i + 1]);
+    } else {
+      if ((payload.size() - 1) % 2 != 0) return;
+      for (size_t i = 1; i + 1 < payload.size(); i += 2)
+        response_fields.push_back((payload[i] << 8) | payload[i + 1]);
+    }
+    std::sort(response_fields.begin(), response_fields.end());
+    if (response_fields == touch_request_fields_) touch_transaction_pending_ = false;
+  }
 }
 
 }
