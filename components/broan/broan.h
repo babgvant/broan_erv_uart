@@ -321,6 +321,7 @@ public:
 	void set_query_allow_shared_address(bool value) { query_allow_shared_address_ = value; }
 	void set_query_tolerant_mode(bool value) { query_tolerant_mode_ = value; }
 	bool request_probe(uint16_t opcode, uint32_t idle_ms = 5);
+	bool request_probe_with_release(uint16_t opcode, uint32_t idle_ms = 5);
 	void set_communication_timeout(uint32_t value) { communication_timeout_ = value; }
 	void set_sensor_timeout(uint32_t value) { sensor_timeout_ = value; }
 	void set_log_packets(bool value) { log_packets_ = value; }
@@ -353,6 +354,8 @@ private:
 	uint32_t query_checksum_baseline_{0}, query_reported_errors_{0}, query_last_touch_reply_{0};
 	uint32_t query_idle_ms_{5};
 	uint32_t query_touch_grant_ms_{UINT32_MAX}, query_touch_request_ms_{UINT32_MAX}, query_touch_reply_ms_{UINT32_MAX};
+	bool query_release_enabled_{false}, query_release_pending_{false}, query_release_sent_{false}, query_release_ack_{false};
+	uint32_t query_release_at_{0}, query_release_ack_ms_{0};
 	uint8_t touch_reply_type_{0};
 	std::vector<uint16_t> touch_request_fields_;
 	uint8_t query_source_address_{0x13};
@@ -362,6 +365,7 @@ private:
 	uint32_t query_queued_at_{0}, query_sent_at_{0}, query_window_at_{0}, query_observe_at_{0};
 	uint32_t query_invalid_baseline_{0}, last_rx_byte_{0};
 	void updateProbe();
+	void updateProbeRelease();
 	void observeProbe(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload);
 	bool observeTouchTransaction(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload);
 	void setProbeStatus(const char *status);

@@ -29,6 +29,7 @@ void BroanComponent::setProbeStatus(const char *status) {
 void BroanComponent::lockProbe(const char *reason) {
   if (query_state_ == QueryState::WAITING || query_state_ == QueryState::OBSERVING) logProbeResult("locked");
   query_loop_.stop();
+  query_release_pending_ = false;
   query_state_ = QueryState::LOCKED;
   query_window_ = false;
   setProbeStatus(reason);
@@ -55,6 +56,8 @@ bool BroanComponent::request_probe(uint16_t opcode, uint32_t idle_ms) {
   }
   query_opcode_ = opcode;
   query_idle_ms_ = idle_ms;
+  query_release_enabled_ = query_release_pending_ = query_release_sent_ = query_release_ack_ = false;
+  query_release_ack_ms_ = 0;
   query_touch_grant_ms_ = query_touch_request_ms_ = query_touch_reply_ms_ = UINT32_MAX;
   query_queued_at_ = millis();
   query_invalid_baseline_ = framer_.invalid;
@@ -80,12 +83,29 @@ bool BroanComponent::request_probe(uint16_t opcode, uint32_t idle_ms) {
   return true;
 }
 
+bool BroanComponent::request_probe_with_release(uint16_t opcode, uint32_t idle_ms) {
+  if (!query_tolerant_mode_ || query_allow_shared_address_) return false;
+  if (!request_probe(opcode, idle_ms)) return false;
+  query_release_enabled_ = query_release_pending_ = true;
+  ESP_LOGI("broan_probe", "Read-and-release experiment armed; one release after reply or 150ms; no retries");
+  return true;
+}
+
 void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload) {
   if (query_state_ == QueryState::LOCKED) return;
   if (!checkProbeErrors()) return;
   if (query_state_ == QueryState::WAITING && static_cast<uint32_t>(millis() - query_sent_at_) >= probeReplyTimeout())
     handleProbeTimeout();
   if (query_state_ == QueryState::LOCKED) return;
+  if ((query_state_ == QueryState::WAITING || query_state_ == QueryState::OBSERVING) && query_release_sent_ &&
+      sender == m_nServerAddress && target == query_source_address_ && payload == std::vector<uint8_t>{0x05}) {
+    if (!query_release_ack_) {
+      query_release_ack_ = true;
+      query_release_ack_ms_ = millis() - query_release_at_;
+      ESP_LOGI("broan_probe", "Probe %u release acknowledged after %ums", (unsigned) query_attempts_, (unsigned) query_release_ack_ms_);
+    }
+    return;
+  }
   const bool matching_reply = sender == m_nServerAddress && target == query_source_address_ &&
       payload.size() == 8 && payload[0] == 0x21 && payload[3] == 4 &&
       payload[1] == (query_opcode_ >> 8) && payload[2] == (query_opcode_ & 0xFF);
@@ -118,6 +138,8 @@ void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vec
     return;
   }
   if (!query_allow_shared_address_ && sender == query_source_address_) {
+    if (query_release_sent_ && target == m_nServerAddress && payload == std::vector<uint8_t>{0x04} &&
+        static_cast<uint32_t>(millis() - query_release_at_) < 10) return;
     if (query_state_ == QueryState::WAITING && target == m_nServerAddress &&
         payload == std::vector<uint8_t>{0x20, static_cast<uint8_t>(query_opcode_ >> 8), static_cast<uint8_t>(query_opcode_)} &&
         static_cast<uint32_t>(millis() - query_sent_at_) < 10) return;
@@ -176,6 +198,7 @@ void BroanComponent::updateProbe() {
   const uint32_t now = millis();
   if (query_state_ == QueryState::IDLE || query_state_ == QueryState::LOCKED) return;
   if (!checkProbeErrors()) return;
+  if (query_state_ == QueryState::WAITING || query_state_ == QueryState::OBSERVING) updateProbeRelease();
   if (query_state_ == QueryState::WAITING) {
     if (static_cast<uint32_t>(now - query_sent_at_) >= probeReplyTimeout()) handleProbeTimeout();
     return;
@@ -218,7 +241,7 @@ void BroanComponent::updateProbe() {
   packet.push_back(4);
   query_window_ = false;
   query_state_ = QueryState::WAITING;
-  query_loop_.stop();
+  if (!query_release_pending_) query_loop_.stop();
   query_sent_ = true;
   ++query_attempts_;
   query_sent_at_ = now;
@@ -231,6 +254,34 @@ void BroanComponent::updateProbe() {
            (unsigned) query_attempts_, query_opcode_, query_source_address_, (unsigned) (now - query_window_at_),
            (unsigned) (now - last_rx_byte_), (unsigned) query_idle_ms_, (unsigned) probeReplyTimeout(), query_tolerant_mode_ ? 2U : 0U);
   setProbeStatus("Read transmitted; waiting for response");
+}
+
+void BroanComponent::updateProbeRelease() {
+  if (!query_release_pending_) return;
+  const uint32_t now = millis();
+  const uint32_t elapsed = now - query_sent_at_;
+  if (elapsed >= 350) {
+    query_release_pending_ = false;
+    query_loop_.stop();
+    ESP_LOGI("broan_probe", "Probe %u release skipped: no eligible idle gap within 350ms", (unsigned) query_attempts_);
+    return;
+  }
+  if ((!query_reply_received_ && elapsed < 150) || static_cast<uint32_t>(now - last_rx_byte_) < 5 ||
+      framer_.has_pending_bytes() || available()) return;
+  std::vector<uint8_t> payload{0x04};
+  std::vector<uint8_t> packet{1, m_nServerAddress, query_source_address_, 1, 1, 0x04};
+  packet.push_back(packet_checksum(query_source_address_, m_nServerAddress, payload));
+  packet.push_back(4);
+  query_release_pending_ = false;
+  query_release_sent_ = true;
+  query_release_at_ = now;
+  query_loop_.stop();
+  flow_control_pin_->digital_write(true);
+  for (auto byte : packet) write(byte);
+  flush();
+  flow_control_pin_->digital_write(false);
+  ESP_LOGI("broan_probe", "Probe %u TX control release at +%ums idle=%ums: %s", (unsigned) query_attempts_,
+           (unsigned) elapsed, (unsigned) (now - last_rx_byte_), format_hex_pretty(packet).c_str());
 }
 
 bool BroanComponent::observeTouchTransaction(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload) {
@@ -329,6 +380,11 @@ void BroanComponent::logProbeResult(const char *result) {
            query_touch_grant_ms_ == UINT32_MAX ? NAN : static_cast<float>(query_touch_grant_ms_),
            query_touch_request_ms_ == UINT32_MAX ? NAN : static_cast<float>(query_touch_request_ms_),
            query_touch_reply_ms_ == UINT32_MAX ? NAN : static_cast<float>(query_touch_reply_ms_));
+  if (query_release_enabled_)
+    ESP_LOGI("broan_probe", "Probe %u release sent=%u ack=%u after=%.0fms ack_rtt=%.0fms", (unsigned) query_attempts_,
+             query_release_sent_ ? 1U : 0U, query_release_ack_ ? 1U : 0U,
+             query_release_sent_ ? static_cast<float>(query_release_at_ - query_sent_at_) : NAN,
+             query_release_ack_ ? static_cast<float>(query_release_ack_ms_) : NAN);
 }
 
 }

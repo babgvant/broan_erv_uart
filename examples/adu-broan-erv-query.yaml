@@ -155,6 +155,11 @@ button:
     on_press:
       - lambda: id(erv).request_probe(0x0510, 3);
   - platform: template
+    name: "Probe Supply Airflow With Release Once"
+    entity_category: diagnostic
+    on_press:
+      - lambda: id(erv).request_probe_with_release(0x0510, 3);
+  - platform: template
     name: "Probe Exhaust RPM Once"
     entity_category: diagnostic
     on_press:
