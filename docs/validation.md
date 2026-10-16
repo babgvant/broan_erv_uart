@@ -88,6 +88,8 @@ The retained-fault helper timestamp is the Home Assistant receipt time, not a cl
 
 ## Field questions and limits
 
+The October 15, 2026 VTTOUCH capture contains repeated `0220` and `0720` responses encoded as one-byte values (`11` and `02`, respectively). The decoder accepts both these byte encodings and the original four-byte integer encodings. Previously, the byte encoding caused the entire response to be rejected with `Unexpected register length`, hiding mode values despite successful polling. The captured response is covered by a native regression test. Mode transitions and display labels still require observation at the controller.
+
 - Which supported IDs are requested by this VTTOUCH, at what intervals, and with what lengths? Registers never observed cannot populate passive sensors, even though active mode can poll them.
 - Does the installed ERV use the repository's fault numbering, and does E38 appear in `1700`? Manufacturer display semantics alone do not prove bus availability. The [Broan AI series manual](https://www.broan-nutone.com/getmedia/b44db6e1-7cec-4416-b839-08f2a1775fc8/Installation-Guide-Users-Manual-AI-Series.pdf) identifies E38 as exhaust motor speed feedback, but it does not document this RS485 register mapping.
 - Does the controller keep requesting after ERV responses cease? Bus activity may stay fresh while telemetry expires.

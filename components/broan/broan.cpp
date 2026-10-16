@@ -268,8 +268,11 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
   for (size_t i = 1; i < message.size();) {
     const auto *field = lookupField(message[i], message[i + 1]);
     const uint8_t len = message[i + 2];
+    // VTTOUCH traffic also reports these numeric mode registers as bytes.
+    const bool byte_mode = len == 1 &&
+        (field == &m_vecFields[BaseMode] || field == &m_vecFields[ActiveMode]);
     if (field && ((field->m_nType == BroanFieldType::Byte && len != 1) ||
-                  ((field->m_nType == BroanFieldType::Int || field->m_nType == BroanFieldType::Float) && len != 4) ||
+                  ((field->m_nType == BroanFieldType::Int || field->m_nType == BroanFieldType::Float) && len != 4 && !byte_mode) ||
                   (field->m_nType == BroanFieldType::Void && len != 0) ||
                   ((field == &m_vecFields[FirmwareVersion] || field == &m_vecFields[HardwareRevision]) && len < 3))) {
       ESP_LOGD("broan", "Unexpected register length");
@@ -316,6 +319,8 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				strBuf.assign( reinterpret_cast<const char*>(message.data() + nDataPos), len );
 			break;
 			default: 
+				// Clear upper bytes when a register changes from four-byte to byte encoding.
+				pField->m_value.m_nValue = 0;
 				for (size_t b = 0; b < len; ++b)
 					pField->m_value.m_rgBytes[b] = static_cast<char>(message[nDataPos+b]);
 			

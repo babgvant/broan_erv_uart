@@ -53,6 +53,25 @@ struct Fixture {
 int main() {
   {
     Fixture f;
+    sensor::Sensor base, active;
+    f.component.set_base_mode_code_sensor(&base);
+    f.component.set_active_mode_code_sensor(&active);
+    // Four-byte modes remain supported; subsequent byte values must clear upper bytes.
+    receive(f.component, 0x10, 0x12, {0x21, 0x02, 0x20, 4, 0x11, 1, 0, 0});
+    assert(base.state == 273);
+    // Actual VTTOUCH response from the October 15 field capture.
+    receive(f.component, 0x10, 0x12, {
+      0x21, 0x04, 0x30, 4, 0, 0, 0, 0, 0x03, 0x30, 4, 0, 0, 0, 0,
+      0x08, 0x20, 1, 0, 0x07, 0x20, 1, 2, 0x06, 0x20, 1, 0x0A,
+      0x02, 0x20, 1, 0x11, 0x00, 0x20, 1, 0x11});
+    assert(base.state == 17 && active.state == 2);
+    // Other malformed integer lengths still reject the entire response.
+    receive(f.component, 0x10, 0x12, {
+      0x21, 0x02, 0x20, 1, 9, 0x08, 0x30, 1, 0});
+    assert(base.state == 17);
+  }
+  {
+    Fixture f;
     assert(std::isnan(f.exhaust.state) && f.fault.state == "Unknown" && !f.fault_active.has_state);
     receive(f.component, 0x11, 0x10, {0x20, 0x04, 0x10});
     receive(f.component, 0x10, 0x11, value(0x04, 0x10, 1250));
