@@ -81,7 +81,8 @@ bool BroanComponent::request_probe(uint16_t opcode, uint32_t idle_ms) {
   query_loop_.start();
   ESP_LOGI("broan_probe", "Queued single read %04X from address %02X idle_min=%ums; no retries", opcode, query_source_address_,
            (unsigned) query_idle_ms_);
-  setProbeStatus("Queued; waiting for Touch handoff");
+  setProbeStatus(query_allow_shared_address_ ? "Queued; waiting for acknowledged Touch grant" :
+                 "Queued; waiting for Touch handoff");
   return true;
 }
 
@@ -233,9 +234,11 @@ void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vec
     return;
   }
   if (query_state_ != QueryState::QUEUED) return;
-  const bool release = sender == m_nClientAddress && target == m_nServerAddress &&
+  const uint8_t window_sender = query_allow_shared_address_ ? m_nServerAddress : m_nClientAddress;
+  const uint8_t window_target = query_allow_shared_address_ ? m_nClientAddress : m_nServerAddress;
+  const bool release = sender == window_sender && target == window_target &&
       payload.size() == 1 && payload[0] == 0x04;
-  const bool acknowledge = touch_yielded_ && sender == m_nServerAddress && target == m_nClientAddress &&
+  const bool acknowledge = touch_yielded_ && sender == window_target && target == window_sender &&
       payload.size() == 1 && payload[0] == 0x05;
   query_window_ = acknowledge && !touch_transaction_pending_;
   if (query_window_) query_window_at_ = millis();
@@ -330,6 +333,8 @@ void BroanComponent::updateProbe() {
   ESP_LOGI("broan_probe", "Probe %u register=%04X source=%02X handoff_age=%ums idle=%ums idle_min=%ums timeout=%ums error_budget=%u",
            (unsigned) query_attempts_, query_opcode_, query_source_address_, (unsigned) (now - query_window_at_),
            (unsigned) (now - last_rx_byte_), (unsigned) query_idle_ms_, (unsigned) probeReplyTimeout(), query_tolerant_mode_ ? 2U : 0U);
+  ESP_LOGI("broan_probe", "Probe %u transmit_window=%s", (unsigned) query_attempts_,
+           query_allow_shared_address_ ? "acknowledged Touch grant" : "Touch release acknowledged by ERV");
   setProbeStatus("Read transmitted; waiting for response");
 }
 

@@ -19,8 +19,10 @@ struct ProbeFixture {
     component.loop();
   }
   void handoff() {
-    receive(component, 0x12, 0x10, {0x04});
-    receive(component, 0x10, 0x12, {0x05});
+    const uint8_t sender = source_address == 0x12 ? 0x10 : 0x12;
+    const uint8_t target = source_address == 0x12 ? 0x12 : 0x10;
+    receive(component, sender, target, {0x04});
+    receive(component, target, sender, {0x05});
   }
   void send(uint16_t opcode = 0x0510) {
     const unsigned starts = test_fast_loop_starts, stops = test_fast_loop_stops;

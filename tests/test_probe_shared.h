@@ -22,6 +22,64 @@ struct SharedFixture : ProbeFixture {
 void run_shared_probe_tests() {
   {
     SharedFixture f;
+    assert(f.component.request_probe(0x0510));
+    assert(f.status.state == "Queued; waiting for acknowledged Touch grant");
+    receive(f.component, 0x12, 0x10, {0x04});
+    receive(f.component, 0x10, 0x12, {0x05});
+    test_now += 5;
+    f.component.loop();
+    assert(f.component.tx.empty());
+    receive(f.component, 0x10, 0x12, {0x04});
+    test_now += 5;
+    f.component.loop();
+    assert(f.component.tx.empty());
+    receive(f.component, 0x12, 0x10, {0x05});
+    test_now += 4;
+    f.component.loop();
+    assert(f.component.tx.empty());
+    ++test_now;
+    f.component.loop();
+    assert(f.component.tx == frame(0x12, 0x10, {0x20, 0x05, 0x10}));
+    assert(f.component.flushes == 1);
+  }
+  {
+    SharedFixture f;
+    assert(f.component.request_probe(0x0510));
+    f.handoff();
+    receive(f.component, 0x12, 0x10, {0x20, 0x09, 0x50});
+    test_now += 5;
+    f.component.loop();
+    assert(f.component.tx.empty());
+    receive(f.component, 0x10, 0x12, value(0x09, 0x50, 40));
+    test_now += 5;
+    f.component.loop();
+    assert(f.component.tx.empty());
+    f.handoff();
+    test_now += 9;
+    f.component.loop();
+    assert(f.component.tx.empty());
+    f.handoff();
+    test_now += 5;
+    f.component.loop();
+    assert(f.component.tx.size() == 10);
+  }
+  {
+    SharedFixture f;
+    assert(f.component.request_probe(0x0510));
+    f.handoff();
+    enqueue(f.component, {1, 0x12});
+    test_now += 5;
+    f.component.loop();
+    test_now += 5;
+    f.component.loop();
+    assert(f.component.tx.empty());
+    test_now += 250;
+    f.component.loop();
+    assert(f.status.state.find("Locked: framing errors") == 0);
+    assert(f.component.tx.empty());
+  }
+  {
+    SharedFixture f;
     f.send();
     test_now += 16;
     receive(f.component, 0x10, 0x12, {0x04});
