@@ -348,6 +348,7 @@ private:
 	uint8_t query_source_address_{0x13};
 	uint16_t query_opcode_{0};
 	QueryState query_state_{QueryState::IDLE};
+	HighFrequencyLoopRequester query_loop_;
 	uint32_t query_queued_at_{0}, query_sent_at_{0}, query_window_at_{0}, query_reply_at_{0};
 	uint32_t query_invalid_baseline_{0}, last_rx_byte_{0};
 	void updateProbe();

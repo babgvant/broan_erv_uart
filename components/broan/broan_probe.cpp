@@ -11,6 +11,7 @@ void BroanComponent::setProbeStatus(const char *status) {
 }
 
 void BroanComponent::lockProbe(const char *reason) {
+  query_loop_.stop();
   query_state_ = QueryState::LOCKED;
   query_window_ = false;
   setProbeStatus(reason);
@@ -40,6 +41,7 @@ bool BroanComponent::request_probe(uint16_t opcode) {
   query_touch_request_ = false;
   query_recovered_ = false;
   query_state_ = QueryState::QUEUED;
+  query_loop_.start();
   ESP_LOGI("broan_probe", "Queued single read %04X from address %02X; no retries", opcode, query_source_address_);
   setProbeStatus("Queued; waiting for Touch handoff");
   return true;
@@ -116,6 +118,7 @@ void BroanComponent::updateProbe() {
     return;
   }
   if (static_cast<uint32_t>(now - query_queued_at_) >= 30000) {
+    query_loop_.stop();
     query_state_ = QueryState::IDLE;
     setProbeStatus("No eligible handoff in 30s; nothing transmitted");
     return;
@@ -130,6 +133,7 @@ void BroanComponent::updateProbe() {
   packet.push_back(4);
   query_window_ = false;
   query_state_ = QueryState::WAITING;
+  query_loop_.stop();
   query_sent_ = true;
   query_sent_at_ = now;
   flow_control_pin_->digital_write(true);

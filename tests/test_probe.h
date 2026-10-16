@@ -19,12 +19,15 @@ struct ProbeFixture {
     receive(component, 0x10, 0x12, {0x05});
   }
   void send() {
+    const unsigned starts = test_fast_loop_starts, stops = test_fast_loop_stops;
     assert(component.request_probe(0x0510));
+    assert(test_fast_loop_starts == starts + 1);
     handoff();
     test_now += 5;
     component.loop();
     assert(component.tx == frame(0x13, 0x10, {0x20, 0x05, 0x10}));
     assert(component.flushes == 1 && direction.writes == 3);
+    assert(test_fast_loop_stops == stops + 1);
   }
 };
 
@@ -86,6 +89,7 @@ void run_probe_tests() {
   }
   {
     ProbeFixture f;
+    const unsigned stops = test_fast_loop_stops;
     assert(f.component.request_probe(0x0510));
     f.handoff();
     receive(f.component, 0x10, 0x12, {0x04});
@@ -99,10 +103,12 @@ void run_probe_tests() {
     test_now += 30000;
     f.component.loop();
     assert(f.status.state == "No eligible handoff in 30s; nothing transmitted");
+    assert(test_fast_loop_stops == stops + 1);
     assert(f.component.request_probe(0x0510));
   }
   {
     ProbeFixture f;
+    const unsigned stops = test_fast_loop_stops;
     assert(f.component.request_probe(0x0510));
     f.handoff();
     enqueue(f.component, {1, 0x12});
@@ -114,6 +120,7 @@ void run_probe_tests() {
     test_now += 251;
     f.component.loop();
     assert(f.status.state.find("Locked: framing errors") == 0);
+    assert(test_fast_loop_stops == stops + 1);
     assert(!f.component.request_probe(0x0510));
   }
   {

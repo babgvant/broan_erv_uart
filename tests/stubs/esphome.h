@@ -36,6 +36,14 @@ inline void test_log(const char *, const char *format, ...) {
 namespace esphome {
 inline uint32_t test_now = 0;
 inline uint32_t millis() { return test_now; }
+inline unsigned test_fast_loop_starts = 0, test_fast_loop_stops = 0;
+class HighFrequencyLoopRequester {
+ public:
+  void start() { if (!started_) { started_ = true; ++test_fast_loop_starts; } }
+  void stop() { if (started_) { started_ = false; ++test_fast_loop_stops; } }
+ private:
+  bool started_{false};
+};
 namespace setup_priority { constexpr float BUS = 100; }
 class Component {
  public:
