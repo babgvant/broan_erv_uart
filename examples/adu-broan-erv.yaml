@@ -12,8 +12,9 @@ esp32:
 
 external_components:
   - source:
-      type: local
-      path: ../components
+      type: git
+      url: https://github.com/babgvant/broan_erv_uart
+      ref: main
     components: [broan]
 
 wifi:

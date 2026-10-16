@@ -78,7 +78,7 @@ Add this to an existing config.
 external_components:
   - source:
       type: git
-      url: https://github.com/nspitko/broan_erv_uart
+      url: https://github.com/babgvant/broan_erv_uart
       ref: main
     components: [ broan ]
 
