@@ -320,7 +320,7 @@ public:
 	void set_query_source_address(uint8_t value) { query_source_address_ = value; }
 	void set_query_allow_shared_address(bool value) { query_allow_shared_address_ = value; }
 	void set_query_tolerant_mode(bool value) { query_tolerant_mode_ = value; }
-	bool request_probe(uint16_t opcode);
+	bool request_probe(uint16_t opcode, uint32_t idle_ms = 5);
 	void set_communication_timeout(uint32_t value) { communication_timeout_ = value; }
 	void set_sensor_timeout(uint32_t value) { sensor_timeout_ = value; }
 	void set_log_packets(bool value) { log_packets_ = value; }
@@ -351,6 +351,8 @@ private:
 	bool query_tolerant_mode_{false}, query_reply_received_{false}, query_reply_late_{false};
 	uint32_t query_attempts_{0}, query_failures_{0}, query_resyncs_{0}, query_rtt_{0};
 	uint32_t query_checksum_baseline_{0}, query_reported_errors_{0}, query_last_touch_reply_{0};
+	uint32_t query_idle_ms_{5};
+	uint32_t query_touch_grant_ms_{UINT32_MAX}, query_touch_request_ms_{UINT32_MAX}, query_touch_reply_ms_{UINT32_MAX};
 	uint8_t touch_reply_type_{0};
 	std::vector<uint16_t> touch_request_fields_;
 	uint8_t query_source_address_{0x13};

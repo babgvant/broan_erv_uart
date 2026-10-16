@@ -52,10 +52,12 @@ struct Fixture {
 };
 #include "test_probe.h"
 #include "test_probe_tolerant.h"
+#include "test_probe_timing.h"
 
 int main() {
   run_probe_tests();
   run_tolerant_probe_tests();
+  run_probe_timing_tests();
   {
     Fixture f;
     sensor::Sensor humidity, minutes;

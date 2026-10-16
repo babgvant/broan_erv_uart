@@ -34,8 +34,9 @@ void BroanComponent::lockProbe(const char *reason) {
   setProbeStatus(reason);
 }
 
-bool BroanComponent::request_probe(uint16_t opcode) {
+bool BroanComponent::request_probe(uint16_t opcode, uint32_t idle_ms) {
   if (!experimental_query_ || passive_mode_ || !flow_control_pin_ ||
+      idle_ms < 1 || idle_ms > 8 || (idle_ms != 5 && !query_tolerant_mode_) ||
       query_source_address_ < 0x12 || query_source_address_ > 0x1F ||
       (query_tolerant_mode_ && query_allow_shared_address_) ||
       ((query_source_address_ == 0x12) != query_allow_shared_address_)) return false;
@@ -53,6 +54,8 @@ bool BroanComponent::request_probe(uint16_t opcode) {
     default: return false;
   }
   query_opcode_ = opcode;
+  query_idle_ms_ = idle_ms;
+  query_touch_grant_ms_ = query_touch_request_ms_ = query_touch_reply_ms_ = UINT32_MAX;
   query_queued_at_ = millis();
   query_invalid_baseline_ = framer_.invalid;
   query_checksum_baseline_ = framer_.checksum_failures;
@@ -71,7 +74,8 @@ bool BroanComponent::request_probe(uint16_t opcode) {
   }
   query_state_ = QueryState::QUEUED;
   query_loop_.start();
-  ESP_LOGI("broan_probe", "Queued single read %04X from address %02X; no retries", opcode, query_source_address_);
+  ESP_LOGI("broan_probe", "Queued single read %04X from address %02X idle_min=%ums; no retries", opcode, query_source_address_,
+           (unsigned) query_idle_ms_);
   setProbeStatus("Queued; waiting for Touch handoff");
   return true;
 }
@@ -91,6 +95,24 @@ void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vec
   if (query_allow_shared_address_ || query_state_ == QueryState::WAITING || query_state_ == QueryState::OBSERVING)
     touch_reply = observeTouchTransaction(sender, target, payload);
   if (query_state_ == QueryState::LOCKED) return;
+  if (query_state_ == QueryState::WAITING || query_state_ == QueryState::OBSERVING) {
+    const uint32_t elapsed = millis() - query_sent_at_;
+    const bool touch_read = sender == m_nClientAddress && target == m_nServerAddress &&
+        payload[0] == 0x20 && payload.size() >= 3 && (payload.size() - 1) % 2 == 0;
+    if (query_touch_grant_ms_ == UINT32_MAX && sender == m_nServerAddress && target == m_nClientAddress &&
+        payload.size() == 1 && payload[0] == 0x04) {
+      query_touch_grant_ms_ = elapsed;
+      ESP_LOGI("broan_probe", "Probe %u first Touch grant at +%ums", (unsigned) query_attempts_, (unsigned) elapsed);
+    }
+    if (query_touch_request_ms_ == UINT32_MAX && touch_read) {
+      query_touch_request_ms_ = elapsed;
+      ESP_LOGI("broan_probe", "Probe %u first Touch read at +%ums", (unsigned) query_attempts_, (unsigned) elapsed);
+    }
+    if (query_touch_reply_ms_ == UINT32_MAX && touch_reply && payload[0] == 0x21) {
+      query_touch_reply_ms_ = elapsed;
+      ESP_LOGI("broan_probe", "Probe %u first matched Touch read reply at +%ums", (unsigned) query_attempts_, (unsigned) elapsed);
+    }
+  }
   if (!query_allow_shared_address_ && target == query_source_address_ && query_state_ != QueryState::WAITING && !late_reply_allowed) {
     lockProbe("Locked: unexpected traffic to probe address; reboot required");
     return;
@@ -187,7 +209,7 @@ void BroanComponent::updateProbe() {
     return;
   }
   if (!query_window_ || touch_transaction_pending_ || static_cast<uint32_t>(now - query_window_at_) > 8 ||
-      static_cast<uint32_t>(now - last_rx_byte_) < 5 ||
+      static_cast<uint32_t>(now - last_rx_byte_) < query_idle_ms_ ||
       framer_.has_pending_bytes() || available()) return;
   std::vector<uint8_t> payload{0x20, static_cast<uint8_t>(query_opcode_ >> 8), static_cast<uint8_t>(query_opcode_)};
   std::vector<uint8_t> packet{1, m_nServerAddress, query_source_address_, 1, static_cast<uint8_t>(payload.size())};
@@ -205,9 +227,9 @@ void BroanComponent::updateProbe() {
   flush();
   flow_control_pin_->digital_write(false);
   ESP_LOGI("broan_probe", "TX single experimental read: %s", format_hex_pretty(packet).c_str());
-  ESP_LOGI("broan_probe", "Probe %u register=%04X source=%02X handoff_age=%ums idle=%ums timeout=%ums error_budget=%u",
+  ESP_LOGI("broan_probe", "Probe %u register=%04X source=%02X handoff_age=%ums idle=%ums idle_min=%ums timeout=%ums error_budget=%u",
            (unsigned) query_attempts_, query_opcode_, query_source_address_, (unsigned) (now - query_window_at_),
-           (unsigned) (now - last_rx_byte_), (unsigned) probeReplyTimeout(), query_tolerant_mode_ ? 2U : 0U);
+           (unsigned) (now - last_rx_byte_), (unsigned) query_idle_ms_, (unsigned) probeReplyTimeout(), query_tolerant_mode_ ? 2U : 0U);
   setProbeStatus("Read transmitted; waiting for response");
 }
 
@@ -302,6 +324,11 @@ void BroanComponent::logProbeResult(const char *result) {
            (unsigned) query_rtt_, (unsigned) (framer_.invalid - query_invalid_baseline_),
            (unsigned) (framer_.checksum_failures - query_checksum_baseline_), (unsigned) query_resyncs_,
            query_recovered_ ? (millis() - query_last_touch_reply_) / 1000.0f : NAN, (unsigned) query_failures_);
+  ESP_LOGI("broan_probe", "Probe %u timing idle_min=%ums touch_grant=%.0fms touch_read=%.0fms touch_reply=%.0fms",
+           (unsigned) query_attempts_, (unsigned) query_idle_ms_,
+           query_touch_grant_ms_ == UINT32_MAX ? NAN : static_cast<float>(query_touch_grant_ms_),
+           query_touch_request_ms_ == UINT32_MAX ? NAN : static_cast<float>(query_touch_request_ms_),
+           query_touch_reply_ms_ == UINT32_MAX ? NAN : static_cast<float>(query_touch_reply_ms_));
 }
 
 }
