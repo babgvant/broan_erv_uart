@@ -30,6 +30,7 @@ void BroanComponent::lockProbe(const char *reason) {
   if (query_state_ == QueryState::WAITING || query_state_ == QueryState::OBSERVING) logProbeResult("locked");
   query_loop_.stop();
   query_release_pending_ = false;
+  query_polling_ = false;
   query_state_ = QueryState::LOCKED;
   query_window_ = false;
   setProbeStatus(reason);
@@ -55,6 +56,7 @@ bool BroanComponent::request_probe(uint16_t opcode, uint32_t idle_ms) {
     default: return false;
   }
   query_opcode_ = opcode;
+  query_automatic_ = false;
   query_idle_ms_ = idle_ms;
   query_release_enabled_ = query_release_pending_ = query_release_sent_ = query_release_ack_ = false;
   query_release_ack_ms_ = 0;
@@ -91,6 +93,33 @@ bool BroanComponent::request_probe_with_release(uint16_t opcode, uint32_t idle_m
   return true;
 }
 
+bool BroanComponent::start_probe_polling() {
+  if (query_polling_) return true;
+  if (!experimental_query_ || passive_mode_ || !query_allow_shared_address_ || query_source_address_ != 0x12 ||
+      query_tolerant_mode_ || !flow_control_pin_ || query_state_ != QueryState::IDLE) return false;
+  if (!have_touch_read_reply_ || static_cast<uint32_t>(millis() - touch_last_read_reply_) >= 1500) {
+    setProbeStatus("Polling refused: waiting for verified Touch traffic");
+    return false;
+  }
+  query_poll_index_ = 0;
+  query_poll_invalid_baseline_ = framer_.invalid;
+  query_polling_ = true;
+  setProbeStatus("Telemetry polling enabled; one read per 60s");
+  return true;
+}
+
+void BroanComponent::stop_probe_polling() {
+  query_polling_ = false;
+  if (query_state_ == QueryState::QUEUED && query_automatic_) {
+    query_loop_.stop();
+    query_window_ = false;
+    query_state_ = QueryState::IDLE;
+    setProbeStatus("Telemetry polling stopped; queued read cancelled");
+  } else if (query_state_ == QueryState::IDLE) {
+    setProbeStatus("Telemetry polling stopped; manual probe required");
+  }
+}
+
 void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload) {
   if (query_state_ == QueryState::LOCKED) return;
   if (!checkProbeErrors()) return;
@@ -111,10 +140,30 @@ void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vec
       payload[1] == (query_opcode_ >> 8) && payload[2] == (query_opcode_ & 0xFF);
   const bool late_reply_allowed = query_tolerant_mode_ && query_state_ == QueryState::OBSERVING &&
       static_cast<uint32_t>(millis() - query_observe_at_) < 5000 && matching_reply;
+  if (query_allow_shared_address_ && query_state_ == QueryState::WAITING && sender == m_nClientAddress &&
+      target == m_nServerAddress && payload[0] == 0x20) {
+    for (size_t i = 1; i + 1 < payload.size(); i += 2) {
+      if (((payload[i] << 8) | payload[i + 1]) == query_opcode_) {
+        lockProbe("Locked: Touch requested probe register; reply attribution ambiguous; reboot required");
+        return;
+      }
+    }
+  }
   bool touch_reply = false;
   if (query_allow_shared_address_ || query_state_ == QueryState::WAITING || query_state_ == QueryState::OBSERVING)
     touch_reply = observeTouchTransaction(sender, target, payload);
   if (query_state_ == QueryState::LOCKED) return;
+  if (query_allow_shared_address_ && (query_polling_ || query_state_ == QueryState::WAITING || query_state_ == QueryState::OBSERVING)) {
+    if (!is_touch_traffic(sender, target, payload)) {
+      lockProbe("Locked: unexpected traffic during shared probe; reboot required");
+      return;
+    }
+    if (sender == m_nServerAddress && (payload[0] == 0x21 || payload[0] == 0x41) &&
+        !touch_reply && !(query_state_ == QueryState::WAITING && matching_reply)) {
+      lockProbe("Locked: unmatched shared-address reply; reboot required");
+      return;
+    }
+  }
   if (query_state_ == QueryState::WAITING || query_state_ == QueryState::OBSERVING) {
     const uint32_t elapsed = millis() - query_sent_at_;
     const bool touch_read = sender == m_nClientAddress && target == m_nServerAddress &&
@@ -147,7 +196,7 @@ void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vec
     return;
   }
   if (query_state_ == QueryState::WAITING) {
-    if (matching_reply && (!query_allow_shared_address_ || !touch_transaction_pending_)) {
+    if (matching_reply) {
       query_state_ = QueryState::OBSERVING;
       query_observe_at_ = millis();
       query_reply_received_ = true;
@@ -155,7 +204,7 @@ void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vec
       ESP_LOGI("broan_probe", "Reply for %04X after %ums: %s", query_opcode_,
                static_cast<unsigned>(millis() - query_sent_at_), format_hex_pretty(payload).c_str());
       setProbeStatus("Reply received; observing bus recovery");
-    } else if (!query_allow_shared_address_ && is_touch_traffic(sender, target, payload)) {
+    } else if (is_touch_traffic(sender, target, payload)) {
       if (sender == m_nClientAddress && payload[0] == 0x20) query_touch_request_ = true;
     } else {
       lockProbe("Locked: other traffic before probe reply; reboot required");
@@ -196,6 +245,29 @@ void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vec
 void BroanComponent::updateProbe() {
   if (!experimental_query_ || passive_mode_) return;
   const uint32_t now = millis();
+  if (query_polling_ && query_state_ == QueryState::QUEUED &&
+      (!have_touch_read_reply_ || static_cast<uint32_t>(now - touch_last_read_reply_) >= 1500)) {
+    lockProbe("Locked: Touch traffic lost before polling read; reboot required");
+    return;
+  }
+  if (query_polling_ && query_state_ == QueryState::IDLE) {
+    if (framer_.invalid != query_poll_invalid_baseline_) {
+      lockProbe("Locked: framing error while polling; reboot required");
+      return;
+    }
+    if (!have_touch_read_reply_ || static_cast<uint32_t>(now - touch_last_read_reply_) >= 1500) {
+      lockProbe("Locked: Touch traffic lost while polling; reboot required");
+      return;
+    }
+    if (!query_sent_ || static_cast<uint32_t>(now - query_sent_at_) >= 60000) {
+      static const uint16_t registers[]{0x0510, 0x0310, 0x0610, 0x0410, 0x2350};
+      if (!request_probe(registers[query_poll_index_])) {
+        stop_probe_polling();
+        return;
+      }
+      query_automatic_ = true;
+    }
+  }
   if (query_state_ == QueryState::IDLE || query_state_ == QueryState::LOCKED) return;
   if (!checkProbeErrors()) return;
   if (query_state_ == QueryState::WAITING || query_state_ == QueryState::OBSERVING) updateProbeRelease();
@@ -204,8 +276,8 @@ void BroanComponent::updateProbe() {
     return;
   }
   if (query_state_ == QueryState::OBSERVING) {
-    if (static_cast<uint32_t>(now - query_observe_at_) >= (query_tolerant_mode_ ? 5000U : 1000U)) {
-      const bool fresh = query_tolerant_mode_ ? static_cast<uint32_t>(now - query_last_touch_reply_) < 1500 :
+    if (static_cast<uint32_t>(now - query_observe_at_) >= (query_tolerant_mode_ || query_allow_shared_address_ ? 5000U : 1000U)) {
+      const bool fresh = query_tolerant_mode_ || query_allow_shared_address_ ? static_cast<uint32_t>(now - query_last_touch_reply_) < 1500 :
           have_valid_packet_ && static_cast<uint32_t>(now - last_valid_packet_) < 500;
       if (!query_recovered_ || !fresh) {
         lockProbe(query_reply_received_ ? "Locked: bus did not resume after reply; reboot required" :
@@ -217,8 +289,10 @@ void BroanComponent::updateProbe() {
           return;
         }
         logProbeResult(query_reply_received_ ? "reply" : "no_reply");
-        query_state_ = query_allow_shared_address_ ? QueryState::LOCKED : QueryState::IDLE;
-        setProbeStatus(query_allow_shared_address_ ? "Shared-address reply received; Touch traffic resumed; reboot before another probe" :
+        query_state_ = QueryState::IDLE;
+        if (query_automatic_) query_poll_index_ = (query_poll_index_ + 1) % 5;
+        setProbeStatus(query_polling_ ? "Telemetry polling; Touch recovered; 60s cooldown" :
+                       query_allow_shared_address_ ? "Shared-address reply received; Touch recovered; 60s cooldown" :
                        query_reply_received_ ? "Reply received; bus traffic resumed; 60s cooldown" :
                        "No reply; Touch recovered; 60s cooldown");
       }
@@ -228,7 +302,10 @@ void BroanComponent::updateProbe() {
   if (static_cast<uint32_t>(now - query_queued_at_) >= 30000) {
     query_loop_.stop();
     query_state_ = QueryState::IDLE;
-    setProbeStatus("No eligible handoff in 30s; nothing transmitted");
+    const bool polling = query_polling_;
+    query_polling_ = false;
+    setProbeStatus(polling ? "Polling stopped: no eligible handoff in 30s; nothing transmitted" :
+                   "No eligible handoff in 30s; nothing transmitted");
     return;
   }
   if (!query_window_ || touch_transaction_pending_ || static_cast<uint32_t>(now - query_window_at_) > 8 ||
@@ -288,7 +365,8 @@ bool BroanComponent::observeTouchTransaction(uint8_t sender, uint8_t target, con
   if (sender == m_nClientAddress && target == m_nServerAddress &&
       (payload[0] == 0x20 || payload[0] == 0x40)) {
     if (touch_transaction_pending_) {
-      if (!query_tolerant_mode_ || query_state_ == QueryState::QUEUED || ++query_resyncs_ > 2) {
+      if ((query_polling_ || query_state_ != QueryState::IDLE) &&
+          (!query_tolerant_mode_ || query_state_ == QueryState::QUEUED || ++query_resyncs_ > 2)) {
         lockProbe("Locked: overlapping Touch transactions; reboot required");
         return false;
       }
@@ -325,6 +403,10 @@ bool BroanComponent::observeTouchTransaction(uint8_t sender, uint8_t target, con
     std::sort(response_fields.begin(), response_fields.end());
     if (response_fields == touch_request_fields_) {
       touch_transaction_pending_ = false;
+      if (payload[0] == 0x21) {
+        touch_last_read_reply_ = millis();
+        have_touch_read_reply_ = true;
+      }
       return true;
     }
   }

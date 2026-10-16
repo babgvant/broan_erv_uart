@@ -5,3 +5,15 @@ broan:
   query_tolerant_mode: false
   query_source_address: 0x12
   query_allow_shared_address: true
+  sensor_timeout: 600s
+
+switch:
+  - platform: template
+    name: Telemetry Polling
+    entity_category: diagnostic
+    restore_mode: ALWAYS_OFF
+    lambda: return id(erv).get_probe_polling();
+    turn_on_action:
+      - lambda: id(erv).start_probe_polling();
+    turn_off_action:
+      - lambda: id(erv).stop_probe_polling();

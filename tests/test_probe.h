@@ -151,7 +151,7 @@ void run_probe_tests() {
     receive(f.component, 0x10, 0x12, {0x21, 0x08, 0x50, 1, 1});
     test_now += 400;
     f.component.loop();
-    assert(f.status.state.find("Locked: bus did not resume") == 0);
+    assert(f.status.state.find("Locked: unmatched shared-address reply") == 0);
   }
   {
     ProbeFixture f(100, true);
@@ -180,28 +180,28 @@ void run_probe_tests() {
     f.component.loop();
     assert(f.component.tx == frame(0x12, 0x10, {0x20, 0x05, 0x10}));
     receive(f.component, 0x10, 0x12, value(0x05, 0x10, 45));
-    test_now += 600;
+    test_now += 4600;
     receive(f.component, 0x12, 0x10, {0x20, 0x09, 0x50});
     receive(f.component, 0x10, 0x12, {0x21, 0x09, 0x50, 4, 40, 0, 0, 0});
     test_now += 400;
     f.component.loop();
-    assert(f.status.state == "Shared-address reply received; Touch traffic resumed; reboot before another probe");
+    assert(f.status.state == "Shared-address reply received; Touch recovered; 60s cooldown");
     test_now += 60000;
-    assert(!f.component.request_probe(0x0310) && f.component.tx.size() == 10);
+    assert(f.component.request_probe(0x0310) && f.component.tx.size() == 10);
   }
   {
     ProbeFixture f(100, true);
     f.send();
     receive(f.component, 0x12, 0x10, {0x20, 0x05, 0x10});
-    assert(f.status.state.find("Locked: other traffic") == 0);
+    assert(f.status.state.find("Locked: Touch requested probe register") == 0);
     receive(f.component, 0x10, 0x12, value(0x05, 0x10, 45));
-    assert(f.status.state.find("Locked: other traffic") == 0 && f.component.tx.size() == 10);
+    assert(f.status.state.find("Locked: Touch requested probe register") == 0 && f.component.tx.size() == 10);
   }
   {
     ProbeFixture f(100, true);
     f.send();
     receive(f.component, 0x10, 0x12, {0x04});
-    assert(f.status.state.find("Locked: other traffic") == 0 && f.component.flushes == 1);
+    assert(f.status.state == "Read transmitted; waiting for response" && f.component.flushes == 1);
   }
   {
     ProbeFixture f(100, true);
