@@ -17,6 +17,20 @@ struct RecoveryFixture : SharedFixture {
 };
 
 void run_recovery_probe_tests() {
+  for (uint32_t start : {100U, UINT32_MAX - 5}) {
+    RecoveryFixture f;
+    test_now = start;
+    f.ready();
+    assert(f.component.start_probe_trial());
+    test_millis_step = 1;
+    f.component.loop();
+    test_millis_step = 0;
+    assert(f.component.get_probe_polling());
+    assert(f.status.state == "Queued; waiting for acknowledged Touch grant");
+    assert(f.component.tx.empty());
+    f.poll_send();
+    assert(f.component.tx.size() == 10);
+  }
   {
     SharedFixture f(true);
     f.normal();

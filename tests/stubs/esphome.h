@@ -35,7 +35,12 @@ inline void test_log(const char *, const char *format, ...) {
 
 namespace esphome {
 inline uint32_t test_now = 0;
-inline uint32_t millis() { return test_now; }
+inline uint32_t test_millis_step = 0;
+inline uint32_t millis() {
+  const uint32_t now = test_now;
+  test_now += test_millis_step;
+  return now;
+}
 inline uint32_t test_micros_extra = 0;
 inline uint32_t micros() { return test_now * 1000U + test_micros_extra; }
 inline unsigned test_fast_loop_starts = 0, test_fast_loop_stops = 0;

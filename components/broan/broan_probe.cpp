@@ -357,6 +357,7 @@ void BroanComponent::updateProbe() {
         return;
       }
       query_automatic_ = true;
+      return;
     }
   }
   if (query_state_ == QueryState::IDLE || query_state_ == QueryState::LOCKED) return;
