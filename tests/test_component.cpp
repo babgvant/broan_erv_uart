@@ -53,6 +53,71 @@ struct Fixture {
 int main() {
   {
     Fixture f;
+    sensor::Sensor humidity, minutes;
+    text_sensor::TextSensor base, active;
+    binary_sensor::BinarySensor enabled, available;
+    f.component.set_humidity_target_sensor(&humidity);
+    f.component.set_intermittent_on_time_sensor(&minutes);
+    f.component.set_base_mode_text_sensor(&base);
+    f.component.set_active_mode_text_sensor(&active);
+    f.component.set_humidity_control_enabled_binary_sensor(&enabled);
+    f.component.set_fault_data_available_binary_sensor(&available);
+    f.component.loop();
+    assert(available.has_state && !available.state && !enabled.has_state);
+    receive(f.component, 0x10, 0x12, value(0x0C, 0x22, 60));
+    receive(f.component, 0x10, 0x12, {0x21, 0x02, 0x22, 4, 0x84, 3, 0, 0, 0x0F, 0x22, 1, 1});
+    assert(humidity.state == 60 && minutes.state == 15 && enabled.state);
+    receive(f.component, 0x10, 0x12, {0x21, 0x02, 0x20, 1, 17, 0x07, 0x20, 1, 2});
+    assert(base.state == "Smart" && active.state == "High");
+    receive(f.component, 0x10, 0x12, {0x21, 0x02, 0x20, 1, 9, 0x07, 0x20, 1, 1});
+    assert(base.state == "Continuous Low" && active.state == "Low");
+    receive(f.component, 0x10, 0x12, {0x21, 0x02, 0x20, 1, 11, 0x07, 0x20, 1, 4});
+    assert(base.state == "Continuous Medium" && active.state == "Medium");
+    receive(f.component, 0x10, 0x12, {0x21, 0x02, 0x20, 1, 10, 0x07, 0x20, 1, 2});
+    assert(base.state == "Continuous High" && active.state == "High");
+    receive(f.component, 0x10, 0x12, {0x21, 0x02, 0x20, 1, 8, 0x07, 0x20, 1, 5});
+    assert(base.state == "Intermittent" && active.state == "Bath Override");
+    receive(f.component, 0x10, 0x12, {0x21, 0x02, 0x20, 1, 8, 0x07, 0x20, 1, 0});
+    assert(base.state == "Intermittent" && active.state == "Idle");
+    receive(f.component, 0x10, 0x12, {0x21, 0x02, 0x20, 1, 222, 0x07, 0x20, 1, 222});
+    assert(base.state == "222" && active.state == "222");
+    receive(f.component, 0x10, 0x12, {0x21, 0x17, 0, 4, 255, 255, 255, 255});
+    assert(available.state && !f.fault_active.state);
+    test_now += 1000;
+    f.component.loop();
+    assert(!available.state && !f.fault_active.has_state && !enabled.has_state);
+    assert(std::isnan(humidity.state) && std::isnan(minutes.state));
+    assert(base.state == "Unknown" && active.state == "Unknown");
+    receive(f.component, 0x10, 0x12, {0x21, 0x0F, 0x22, 1, 0});
+    assert(enabled.has_state && !enabled.state);
+    assert(f.component.tx.empty() && f.component.flushes == 0 && f.direction.writes == 0);
+  }
+  {
+    Fixture f;
+    f.component.set_register_discovery(true);
+    f.component.set_log_unknown_registers(true);
+    test_logs.clear();
+    receive(f.component, 0x10, 0x12, {0x21, 0x12, 0, 4, 255, 255, 255, 255});
+    assert(test_logs.back().find("unmapped len=4 raw=FF.FF.FF.FF") != std::string::npos);
+    const size_t first_count = test_logs.size();
+    test_now += 100;
+    receive(f.component, 0x10, 0x12, {0x21, 0x12, 0, 4, 255, 255, 255, 255});
+    assert(test_logs.size() == first_count && f.component.get_unknown_registers() == 2);
+    test_now += 200;
+    receive(f.component, 0x10, 0x12, {0x21, 0x12, 0, 1, 0});
+    assert(test_logs.back().find("unmapped len=1 raw=00") != std::string::npos);
+    receive(f.component, 0x12, 0x10, {0x20, 0x17, 0});
+    test_now = 60400;
+    f.component.loop();
+    bool summary = false, missing = false;
+    for (const auto &line : test_logs) {
+      summary |= line.find("Register 1200 requests=0 responses=3 len=1 age=60.0s max_gap=0.2s raw=00") != std::string::npos;
+      missing |= line.find("Register 1700 requests=1 responses=0 (never observed)") != std::string::npos;
+    }
+    assert(summary && missing && f.component.tx.empty());
+  }
+  {
+    Fixture f;
     sensor::Sensor base, active;
     f.component.set_base_mode_code_sensor(&base);
     f.component.set_active_mode_code_sensor(&active);

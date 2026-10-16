@@ -37,6 +37,14 @@ DEPENDENCIES = ["broan"]
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(CONF_BROAN_ID): cv.use_id(BroanComponent),
+        cv.Optional("humidity_target"): sensor.sensor_schema(
+            unit_of_measurement="%", accuracy_decimals=0,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
+        cv.Optional("intermittent_on_time"): sensor.sensor_schema(
+            unit_of_measurement="min", accuracy_decimals=0,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
         cv.Optional(CONF_POWER): sensor.sensor_schema(
             device_class=DEVICE_CLASS_POWER,
             icon=ICON_POWER,
@@ -94,6 +102,10 @@ CONFIG_SCHEMA = cv.Schema(
 
 async def to_code(config):
     broan_component = await cg.get_variable(config[CONF_BROAN_ID])
+    for key in ("humidity_target", "intermittent_on_time"):
+        if key in config:
+            sens = await sensor.new_sensor(config[key])
+            cg.add(getattr(broan_component, f"set_{key}_sensor")(sens))
     if power_config := config.get(CONF_POWER):
         sens = await sensor.new_sensor(power_config)
         cg.add(broan_component.set_power_sensor(sens))

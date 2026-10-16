@@ -8,6 +8,17 @@
 #include <vector>
 #include <type_traits>
 #include <deque>
+#include <cstdarg>
+
+inline std::vector<std::string> test_logs;
+inline void test_log(const char *, const char *format, ...) {
+  char buffer[2048];
+  va_list args;
+  va_start(args, format);
+  vsnprintf(buffer, sizeof(buffer), format, args);
+  va_end(args);
+  test_logs.emplace_back(buffer);
+}
 
 #define USE_SENSOR
 #define USE_TEXT_SENSOR
@@ -18,8 +29,8 @@
 #define USE_BUTTON
 #define ESP_LOGE(...) ((void)0)
 #define ESP_LOGW(...) ((void)0)
-#define ESP_LOGD(...) ((void)0)
-#define ESP_LOGI(...) ((void)0)
+#define ESP_LOGD(...) test_log(__VA_ARGS__)
+#define ESP_LOGI(...) test_log(__VA_ARGS__)
 #define ESP_LOGCONFIG(...) ((void)0)
 
 namespace esphome {
@@ -64,8 +75,19 @@ namespace select { using Select = text_sensor::TextSensor; }
 namespace number { using Number = sensor::Sensor; }
 namespace switch_ { using Switch = binary_sensor::BinarySensor; }
 namespace button { struct Button {}; }
-inline std::string format_hex_pretty(const std::vector<uint8_t> &) { return ""; }
-inline std::string format_hex_pretty(const uint8_t *, size_t) { return ""; }
+inline std::string format_hex_pretty(const uint8_t *data, size_t size) {
+  std::string result;
+  for (size_t i = 0; i < size; ++i) {
+    char buffer[4];
+    snprintf(buffer, sizeof(buffer), "%02X", data[i]);
+    if (i) result += ".";
+    result += buffer;
+  }
+  return result;
+}
+inline std::string format_hex_pretty(const std::vector<uint8_t> &data) {
+  return format_hex_pretty(data.data(), data.size());
+}
 }
 
 #define TEST_SUB_ENTITY(ns, cls, suffix, name) protected: ns::cls *name##_##suffix##_{nullptr}; public: void set_##name##_##suffix(ns::cls *value) { name##_##suffix##_ = value; }

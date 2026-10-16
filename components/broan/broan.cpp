@@ -297,10 +297,10 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 		i += len;
 
 		uint32_t unField = lookupFieldIndex(nOpcodeHigh, nOpcodeLow);
-        observeRegister(nOpcode, false);
+        const bool changed = observeResponse(nOpcode, message.data() + nDataPos, len);
         if (unField == INVALID_FIELD) {
             ++unknown_registers_;
-            if (log_unknown_registers_) handleUnknownField(nOpcodeHigh, nOpcodeLow, len, nDataPos, message);
+            if (log_unknown_registers_ && changed) handleUnknownField(nOpcodeHigh, nOpcodeLow, len, nDataPos, message);
             continue;
         }
         received_at_[unField] = millis();
@@ -330,6 +330,10 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 
 		
 #ifdef USE_SENSOR
+        if (unField == BroanField::TargetHumidityA && humidity_target_sensor_)
+            humidity_target_sensor_->publish_state(pField->m_value.m_flValue);
+        if (unField == BroanField::IntModeDuration && intermittent_on_time_sensor_)
+            intermittent_on_time_sensor_->publish_state(pField->m_value.m_nValue / 60.0f);
         if (unField == BroanField::FaultCode && fault_code_sensor_)
             fault_code_sensor_->publish_state(static_cast<int32_t>(pField->m_value.m_nValue));
         if (unField == BroanField::WarningCode && warning_code_sensor_)
@@ -338,6 +342,15 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
             base_mode_code_sensor_->publish_state(pField->m_value.m_nValue);
         if (unField == BroanField::ActiveMode && active_mode_code_sensor_)
             active_mode_code_sensor_->publish_state(pField->m_value.m_nValue);
+#endif
+
+#ifdef USE_BINARY_SENSOR
+        if (unField == BroanField::FaultCode && fault_data_available_binary_sensor_)
+            fault_data_available_binary_sensor_->publish_state(true);
+        if (unField == BroanField::HumidityControl && humidity_control_enabled_binary_sensor_)
+            humidity_control_enabled_binary_sensor_->publish_state(pField->m_value.m_chValue != 0);
+        if (unField == BroanField::FaultCode && fault_active_binary_sensor_)
+            fault_active_binary_sensor_->publish_state(pField->m_value.m_nValue != 0xFFFFFFFF);
 #endif
 
 		switch(unField)
@@ -538,10 +551,7 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 				if( !base_mode_text_sensor_ )
 						continue;
 
-				// @todo
-				char buf[30];
-				snprintf( buf, sizeof(buf), "%u", (unsigned)pField->m_value.m_nValue );
-				base_mode_text_sensor_->publish_state( buf );
+                base_mode_text_sensor_->publish_state(baseModeToString(pField->m_value.m_nValue));
 			break;
 
 
@@ -553,11 +563,8 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 			break;
 #endif
 		}
-#ifdef USE_BINARY_SENSOR
-        if (unField == BroanField::FaultCode && fault_active_binary_sensor_)
-            fault_active_binary_sensor_->publish_state(pField->m_value.m_nValue != 0xFFFFFFFF);
-#endif
-		// This is no longer useful outside of development, ifdefing out.
+
+        if (!changed) continue;
 		switch( pField->m_nType )
 		{
 			case BroanFieldType::Byte:
@@ -581,53 +588,9 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 
 void BroanComponent::handleUnknownField(uint32_t nOpcodeHigh, uint32_t nOpcodeLow, uint8_t len, uint32_t i, const std::vector<uint8_t>& message )
 {
-#ifdef SCAN_UNKNOWN
-	uint16_t kv = ( nOpcodeHigh << 8 ) | nOpcodeLow;
-	if( m_vecFieldData.contains( kv ) )
-	{
-		BroanField_t copy = m_vecFieldData[ kv ];
-
-		for (size_t b = 0; b < len && b < 4; ++b)
-			m_vecFieldData[kv].m_value.m_rgBytes[b] = static_cast<char>(message[i+b]);
-
-		if( m_vecFieldData[kv].m_value.m_nValue != copy.m_value.m_nValue )
-		{
-
-
-			if( len == 4)
-				ESP_LOGD("broan","%02" PRIX32 "%02" PRIX32 " field is unmapped. Value: %f / %" PRIu32 " -->  %f / %" PRIu32, nOpcodeHigh, nOpcodeLow,
-					copy.m_value.m_flValue, copy.m_value.m_nValue,
-					m_vecFieldData[kv].m_value.m_flValue, m_vecFieldData[kv].m_value.m_nValue ) ;
-			else if (len == 1)
-				ESP_LOGD("broan","%02" PRIX32 "%02" PRIX32 " field is unmapped. Value: %f / %" PRIu32 " -->  %f / %" PRIu32, nOpcodeHigh, nOpcodeLow,
-					copy.m_value.m_flValue, copy.m_value.m_nValue,
-					m_vecFieldData[kv].m_value.m_flValue, m_vecFieldData[kv].m_value.m_nValue ) ;
-		}
-	}
-	else
-#endif
-	{
-		BroanField_t newField;
-		newField.m_nOpcodeHigh = nOpcodeHigh;
-		newField.m_nOpcodeLow = nOpcodeLow;
-		newField.m_nType = len == 4 ? BroanFieldType::Float : BroanFieldType::Byte;
-
-		for (size_t b = 0; b < len && b < 4; ++b)
-			newField.m_value.m_rgBytes[b] = static_cast<char>(message[i+b]);
-
-
-		if( len == 4)
-			ESP_LOGD("broan","%02" PRIX32 "%02" PRIX32 " field is unmapped. Value: %f / %" PRIu32, nOpcodeHigh, nOpcodeLow, newField.m_value.m_flValue, newField.m_value.m_nValue );
-		else if( len == 1 )
-			ESP_LOGD("broan","%02" PRIX32 "%02" PRIX32 " field is unmapped. Value: %i", nOpcodeHigh, nOpcodeLow, newField.m_value.m_chValue);
-		else
-			ESP_LOGD("broan","%02" PRIX32 "%02" PRIX32 " has unhandled field length %i: %s", nOpcodeHigh, nOpcodeLow, len, format_hex_pretty(&message[i], len).c_str() );
-#ifdef SCAN_UNKNOWN
-		m_vecFieldData[kv] = newField;
-#endif
-
-	}
-
+    ESP_LOGD("broan", "%02" PRIX32 "%02" PRIX32 " unmapped len=%u raw=%s",
+             nOpcodeHigh, nOpcodeLow, static_cast<unsigned>(len),
+             format_hex_pretty(message.data() + i, len).c_str());
 }
 
 void BroanComponent::send(const std::vector<uint8_t>& vecMessage)
@@ -780,6 +743,18 @@ void BroanComponent::runTasks()
 #endif
 }
 
+std::string BroanComponent::baseModeToString(int code) {
+    switch (code) {
+        case 1: return "Standby";
+        case 8: return "Intermittent";
+        case 9: return "Continuous Low";
+        case 10: return "Continuous High";
+        case 11: return "Continuous Medium";
+        case 17: return "Smart";
+        default: return std::to_string(code);
+    }
+}
+
 std::string BroanComponent::activeModeToString( int code )
 {
 	// @todo: Figure these out
@@ -799,10 +774,11 @@ std::string BroanComponent::activeModeToString( int code )
 	switch( code )
 	{
 		case 0: return "Idle";
-		case 1: return "Running";
-		case 2: return "Max";
+		case 1: return "Low";
+		case 2: return "High";
 		case 3: return "Turbo";
-		case 4: return "Manual";
+		case 4: return "Medium";
+		case 5: return "Bath Override";
 	}
 	
 

@@ -73,6 +73,8 @@ sensor:
     exhaust_fan_rpm: {name: Exhaust Fan RPM}
     base_mode_code: {name: Base Mode Code}
     active_mode_code: {name: Active Mode Code}
+    humidity_target: {name: Humidity Target}
+    intermittent_on_time: {name: Intermittent On Time}
   - platform: template
     name: RS485 Packets Received
     entity_category: diagnostic
@@ -120,9 +122,11 @@ text_sensor:
 binary_sensor:
   - platform: broan
     fault_active: {name: Fault Active}
+    fault_data_available: {name: Fault Data Available}
+    humidity_control_enabled: {name: Humidity Control Enabled}
     communication_ok: {name: RS485 Communication}
   - platform: status
-    name: Device Online
+    name: API Connected
 
 button:
   - platform: restart

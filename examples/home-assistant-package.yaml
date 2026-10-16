@@ -126,7 +126,7 @@ automation:
         for: "00:01:00"
     conditions:
       - condition: state
-        entity_id: binary_sensor.adu_erv_device_online
+        entity_id: binary_sensor.adu_erv_api_connected
         state: "on"
     actions:
       - action: persistent_notification.create
@@ -139,11 +139,11 @@ automation:
     alias: ADU ERV monitor unavailable
     triggers:
       - trigger: state
-        entity_id: binary_sensor.adu_erv_device_online
+        entity_id: binary_sensor.adu_erv_api_connected
         to: "unavailable"
         for: "00:02:00"
       - trigger: state
-        entity_id: binary_sensor.adu_erv_device_online
+        entity_id: binary_sensor.adu_erv_api_connected
         to: "off"
         for: "00:02:00"
     actions:
@@ -159,7 +159,7 @@ automation:
       - trigger: template
         value_template: >-
           {{ is_state('input_boolean.adu_erv_fan_alerts_enabled', 'on') and
-             is_state('binary_sensor.adu_erv_device_online', 'on') and
+             is_state('binary_sensor.adu_erv_api_connected', 'on') and
              (not has_value('sensor.adu_erv_exhaust_fan_rpm') or
               not has_value('sensor.adu_erv_supply_fan_rpm')) }}
         for: "00:02:00"

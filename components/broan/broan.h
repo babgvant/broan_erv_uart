@@ -181,6 +181,8 @@ class BroanComponent : public Component, public uart::UARTDevice
 	SUB_SENSOR(warning_code)
 	SUB_SENSOR(base_mode_code)
 	SUB_SENSOR(active_mode_code)
+	SUB_SENSOR(humidity_target)
+	SUB_SENSOR(intermittent_on_time)
 #endif
 
 #ifdef USE_SELECT
@@ -216,6 +218,8 @@ class BroanComponent : public Component, public uart::UARTDevice
 #ifdef USE_BINARY_SENSOR
 	SUB_BINARY_SENSOR(fault_active)
 	SUB_BINARY_SENSOR(communication_ok)
+	SUB_BINARY_SENSOR(fault_data_available)
+	SUB_BINARY_SENSOR(humidity_control_enabled)
 #endif
 
 public:
@@ -342,11 +346,15 @@ private:
 	uint32_t received_at_[BroanField::MAX_FIELDS]{};
 	bool field_seen_[BroanField::MAX_FIELDS]{}, field_stale_[BroanField::MAX_FIELDS]{};
 	uint32_t last_fault_value_{0xFFFFFFFF};
-	struct RegisterObservation { uint32_t requests{0}, responses{0}; };
+	struct RegisterObservation {
+		uint32_t requests{0}, responses{0}, last_response{0}, max_gap{0};
+		std::vector<uint8_t> value;
+	};
 	std::map<uint16_t, RegisterObservation> observations_;
 	void updateFreshness();
 	void expireField(uint32_t field);
 	void observeRegister(uint16_t opcode, bool request);
+	bool observeResponse(uint16_t opcode, const uint8_t *data, size_t length);
 
 	uint32_t m_nLastHadControl = 0;
 	uint32_t m_unLastHeartbeat = 0; // Next time to send heartbeat
@@ -390,6 +398,7 @@ private:
 
 	void queueMessage(std::vector<uint8_t>& message);
 	std::string activeModeToString( int code );
+	std::string baseModeToString(int code);
 
 
 protected:
