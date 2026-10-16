@@ -1,7 +1,7 @@
 #pragma once
 
 struct SharedFixture : ProbeFixture {
-  SharedFixture() : ProbeFixture(100, true) {}
+  explicit SharedFixture(bool uart = false) : ProbeFixture(100, true, false, uart) {}
   void normal(uint16_t opcode = 0x0950) {
     receive(component, 0x12, 0x10, {0x20, static_cast<uint8_t>(opcode >> 8), static_cast<uint8_t>(opcode)});
     receive(component, 0x10, 0x12, value(opcode >> 8, opcode & 255, 40));

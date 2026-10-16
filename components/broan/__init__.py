@@ -30,6 +30,7 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_FLOW_CONTROL_PIN): pins.gpio_output_pin_schema,
             cv.Optional("passive_mode", default=False): cv.boolean,
             cv.Optional("experimental_query", default=False): cv.boolean,
+            cv.Optional("query_uart_direction", default=False): cv.boolean,
             cv.Optional("query_tolerant_mode", default=False): cv.boolean,
             cv.Optional("query_allow_shared_address", default=False): cv.boolean,
             cv.Optional("query_source_address", default=0x13): cv.All(
@@ -52,6 +53,8 @@ BroanBaseSchema = cv.Schema(
 )
 
 def FINAL_VALIDATE_SCHEMA(config):
+    if config["query_uart_direction"] and not config["experimental_query"]:
+        raise cv.Invalid("query_uart_direction requires experimental_query")
     if config["query_tolerant_mode"] and (not config["experimental_query"] or config["query_allow_shared_address"]):
         raise cv.Invalid("query_tolerant_mode requires experimental_query with a separate source address")
     if config["query_allow_shared_address"]:
@@ -62,13 +65,17 @@ def FINAL_VALIDATE_SCHEMA(config):
     if config["experimental_query"]:
         if config["passive_mode"]:
             raise cv.Invalid("experimental_query cannot enable transmissions in passive_mode")
-        if CONF_FLOW_CONTROL_PIN not in config:
+        if not config["query_uart_direction"] and CONF_FLOW_CONTROL_PIN not in config:
             raise cv.Invalid("experimental_query requires a transmit flow_control_pin")
-        def manual_direction(hub):
-            if "flow_control_pin" in hub:
+        if config["query_uart_direction"] and CONF_FLOW_CONTROL_PIN in config:
+            raise cv.Invalid("query_uart_direction must not configure broan.flow_control_pin")
+        def validate_direction(hub):
+            if config["query_uart_direction"] and CONF_FLOW_CONTROL_PIN not in hub:
+                raise cv.Invalid("query_uart_direction requires uart.flow_control_pin")
+            if not config["query_uart_direction"] and CONF_FLOW_CONTROL_PIN in hub:
                 raise cv.Invalid("experimental_query uses broan.flow_control_pin, not UART flow control")
             return hub
-        cv.Schema({cv.Required("uart_id"): fv.id_declaration_match_schema(manual_direction)},
+        cv.Schema({cv.Required("uart_id"): fv.id_declaration_match_schema(validate_direction)},
                   extra=cv.ALLOW_EXTRA)(config)
     if config["passive_mode"] and CONF_FLOW_CONTROL_PIN in config:
         raise cv.Invalid("passive_mode must not configure a transmit flow_control_pin")
@@ -92,7 +99,8 @@ async def to_code(config):
     await uart.register_uart_device(var, config)
     for option in ("passive_mode", "communication_timeout", "sensor_timeout",
                    "log_packets", "log_unknown_registers", "register_discovery",
-                   "experimental_query", "query_source_address", "query_allow_shared_address", "query_tolerant_mode"):
+                   "experimental_query", "query_source_address", "query_allow_shared_address", "query_tolerant_mode",
+                   "query_uart_direction"):
         cg.add(getattr(var, f"set_{option}")(config[option]))
 
     if CONF_FLOW_CONTROL_PIN in config:

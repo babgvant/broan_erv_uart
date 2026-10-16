@@ -37,7 +37,7 @@ void BroanComponent::lockProbe(const char *reason) {
 }
 
 bool BroanComponent::request_probe(uint16_t opcode, uint32_t idle_ms) {
-  if (!experimental_query_ || passive_mode_ || !flow_control_pin_ ||
+  if (!experimental_query_ || passive_mode_ || !probeDirectionValid() ||
       idle_ms < 1 || idle_ms > 8 || (idle_ms != 5 && !query_tolerant_mode_) ||
       query_source_address_ < 0x12 || query_source_address_ > 0x1F ||
       (query_tolerant_mode_ && query_allow_shared_address_) ||
@@ -97,7 +97,7 @@ bool BroanComponent::request_probe_with_release(uint16_t opcode, uint32_t idle_m
 bool BroanComponent::start_probe_polling() {
   if (query_polling_) return true;
   if (!experimental_query_ || passive_mode_ || !query_allow_shared_address_ || query_source_address_ != 0x12 ||
-      query_tolerant_mode_ || !flow_control_pin_ || query_state_ != QueryState::IDLE) return false;
+      query_tolerant_mode_ || !probeDirectionValid() || query_state_ != QueryState::IDLE) return false;
   if (!have_touch_read_reply_ || static_cast<uint32_t>(millis() - touch_last_read_reply_) >= 1500) {
     setProbeStatus("Polling refused: waiting for verified Touch traffic");
     return false;
@@ -325,10 +325,7 @@ void BroanComponent::updateProbe() {
   query_sent_ = true;
   ++query_attempts_;
   query_sent_at_ = now;
-  flow_control_pin_->digital_write(true);
-  for (auto byte : packet) write(byte);
-  flush();
-  flow_control_pin_->digital_write(false);
+  if (!transmitProbePacket(packet)) return;
   ESP_LOGI("broan_probe", "TX single experimental read: %s", format_hex_pretty(packet).c_str());
   ESP_LOGI("broan_probe", "Probe %u register=%04X source=%02X handoff_age=%ums idle=%ums idle_min=%ums timeout=%ums error_budget=%u",
            (unsigned) query_attempts_, query_opcode_, query_source_address_, (unsigned) (now - query_window_at_),
@@ -358,12 +355,31 @@ void BroanComponent::updateProbeRelease() {
   query_release_sent_ = true;
   query_release_at_ = now;
   query_loop_.stop();
-  flow_control_pin_->digital_write(true);
-  for (auto byte : packet) write(byte);
-  flush();
-  flow_control_pin_->digital_write(false);
+  if (!transmitProbePacket(packet)) return;
   ESP_LOGI("broan_probe", "Probe %u TX control release at +%ums idle=%ums: %s", (unsigned) query_attempts_,
            (unsigned) elapsed, (unsigned) (now - last_rx_byte_), format_hex_pretty(packet).c_str());
+}
+
+bool BroanComponent::transmitProbePacket(const std::vector<uint8_t> &packet) {
+  const uint32_t started = micros();
+  if (!query_uart_direction_) flow_control_pin_->digital_write(true);
+  write_array(packet.data(), packet.size());
+  const uint32_t queued = micros();
+  const auto result = flush();
+  const uint32_t drained = micros();
+  if (!query_uart_direction_) flow_control_pin_->digital_write(false);
+  const uint32_t finished = micros();
+  ESP_LOGI("broan_probe", "Probe %u TX direction=%s bytes=%u write_us=%u flush_us=%u call_us=%u software_de_us=%.0f wire_us=%u flush_result=%u",
+           (unsigned) query_attempts_, query_uart_direction_ ? "uart" : "software", (unsigned) packet.size(),
+           (unsigned) (queued - started), (unsigned) (drained - queued), (unsigned) (finished - started),
+           query_uart_direction_ ? NAN : static_cast<float>(finished - started),
+           (unsigned) ((packet.size() * 10000000UL + 38399) / 38400), (unsigned) result);
+  if (result != uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS &&
+      result != uart::UARTFlushResult::UART_FLUSH_RESULT_ASSUMED_SUCCESS) {
+    lockProbe("Locked: UART transmit did not complete; reboot required");
+    return false;
+  }
+  return true;
 }
 
 bool BroanComponent::observeTouchTransaction(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload) {

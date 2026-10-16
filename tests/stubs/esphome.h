@@ -36,6 +36,8 @@ inline void test_log(const char *, const char *format, ...) {
 namespace esphome {
 inline uint32_t test_now = 0;
 inline uint32_t millis() { return test_now; }
+inline uint32_t test_micros_extra = 0;
+inline uint32_t micros() { return test_now * 1000U + test_micros_extra; }
 inline unsigned test_fast_loop_starts = 0, test_fast_loop_stops = 0;
 class HighFrequencyLoopRequester {
  public:
@@ -59,15 +61,20 @@ struct GPIOPin {
   void dump_summary(char *, unsigned) {}
 };
 namespace uart {
+enum class UARTFlushResult { UART_FLUSH_RESULT_SUCCESS, UART_FLUSH_RESULT_TIMEOUT, UART_FLUSH_RESULT_FAILED, UART_FLUSH_RESULT_ASSUMED_SUCCESS };
 class UARTDevice {
  public:
   std::deque<uint8_t> rx;
   std::vector<uint8_t> tx;
   unsigned flushes = 0;
+  unsigned array_writes = 0;
+  uint32_t write_delay_us = 0, flush_delay_us = 0;
+  UARTFlushResult flush_result = UARTFlushResult::UART_FLUSH_RESULT_SUCCESS;
   size_t available() { return rx.size(); }
   bool read_byte(uint8_t *byte) { if (rx.empty()) return false; *byte = rx.front(); rx.pop_front(); return true; }
   void write(uint8_t byte) { tx.push_back(byte); }
-  void flush() { ++flushes; }
+  void write_array(const uint8_t *data, size_t len) { ++array_writes; tx.insert(tx.end(), data, data + len); test_micros_extra += write_delay_us; }
+  UARTFlushResult flush() { ++flushes; test_micros_extra += flush_delay_us; return flush_result; }
 };
 }
 namespace sensor {

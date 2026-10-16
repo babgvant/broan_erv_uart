@@ -1,0 +1,13 @@
+packages:
+  query_base: !include adu-broan-erv-shared-query.yaml
+
+uart:
+  id: broan_uart
+  flow_control_pin: GPIO21
+  rx_full_threshold: 1
+  rx_timeout: 1
+  flush_timeout: 20ms
+
+broan:
+  flow_control_pin: !remove
+  query_uart_direction: true

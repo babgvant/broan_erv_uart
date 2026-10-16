@@ -317,6 +317,7 @@ public:
 	void set_flow_control_pin(GPIOPin *flow_control_pin) { this->flow_control_pin_ = flow_control_pin; }
 	void set_passive_mode(bool value) { passive_mode_ = value; }
 	void set_experimental_query(bool value) { experimental_query_ = value; }
+	void set_query_uart_direction(bool value) { query_uart_direction_ = value; }
 	void set_query_source_address(uint8_t value) { query_source_address_ = value; }
 	void set_query_allow_shared_address(bool value) { query_allow_shared_address_ = value; }
 	void set_query_tolerant_mode(bool value) { query_tolerant_mode_ = value; }
@@ -350,6 +351,7 @@ public:
 private:
 	enum class QueryState { IDLE, QUEUED, WAITING, OBSERVING, LOCKED };
 	bool experimental_query_{false}, query_window_{false}, touch_yielded_{false}, query_sent_{false};
+	bool query_uart_direction_{false};
 	bool query_touch_request_{false}, query_recovered_{false};
 	bool query_allow_shared_address_{false}, touch_transaction_pending_{false};
 	bool query_tolerant_mode_{false}, query_reply_received_{false}, query_reply_late_{false};
@@ -372,6 +374,8 @@ private:
 	uint32_t query_invalid_baseline_{0}, last_rx_byte_{0};
 	void updateProbe();
 	void updateProbeRelease();
+	bool transmitProbePacket(const std::vector<uint8_t> &packet);
+	bool probeDirectionValid() const { return query_uart_direction_ ? flow_control_pin_ == nullptr : flow_control_pin_ != nullptr; }
 	void observeProbe(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload);
 	bool observeTouchTransaction(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload);
 	void setProbeStatus(const char *status);

@@ -15,7 +15,7 @@ void BroanComponent::setup()
 	for( int i=0; i<BroanField::MAX_FIELDS; i++ )
 		m_vecFields[i].markDirty();
 
-    if(flow_control_pin_ && !passive_mode_)
+    if(flow_control_pin_ && !passive_mode_ && !query_uart_direction_)
     {
         this->flow_control_pin_->setup();
         if (experimental_query_) this->flow_control_pin_->digital_write(false);
@@ -25,6 +25,7 @@ void BroanComponent::setup()
         snprintf(status, sizeof(status), "Idle; source 0x%02X; %s; manual probe required", query_source_address_,
                  query_tolerant_mode_ ? "tolerant" : query_allow_shared_address_ ? "shared strict" : "strict");
         setProbeStatus(status);
+        ESP_LOGI("broan_probe", "RS485 direction=%s", query_uart_direction_ ? "UART-managed" : "software GPIO");
     }
 
 	// Initial state
