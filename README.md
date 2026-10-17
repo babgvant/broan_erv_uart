@@ -72,9 +72,134 @@ Q: What if I still want wall controls?
 
 A: You can use the aux remotes, those use the dry contact interface which is a hard override. The fan mode will indicate "ovr" (override) when these controls are used. This is how Broan bypasses the protocol limitation. Alternatively, look at something like the Sonoff NSPanel and control the device via Home Assistant instead.
 
-### ESPhome yaml
-Add this to an existing config.
+## YAML configuration reference
+
+The settings below cover the custom `broan` component and every `platform: broan` entity. Normal ESPHome device settings (`wifi`, `api`, `ota`, `logger`, etc.) remain part of your device configuration; complete board configurations are in [examples](examples/).
+
+### UART and operating mode
+
+The linked `uart` must use **38400 baud, 8 data bits, no parity, and 1 stop bit**. Set `rx_pin` for every mode and `tx_pin` for active controller or experimental query mode. Pin numbers depend on your board. The examples use `rx_buffer_size: 2048`. If the logger shares the serial port, disable serial logging with `logger: {baud_rate: 0}`.
+
+| `broan:` setting | Default | Meaning |
+| --- | --- | --- |
+| `id` | Generated | Component ID for `broan_id` references and lambdas such as `id(erv).setCurrentHumidity(...)`. |
+| `uart_id` | Inferred when unambiguous | ID of the UART connected to the RS485 transceiver. Set it explicitly when multiple UARTs exist. |
+| `flow_control_pin` | Unset | GPIO output controlling the transceiver's transmit enable. Configure when required by your active-controller hardware. Required for experimental queries unless `query_uart_direction` is enabled. Forbidden in passive mode. |
+| `passive_mode` | `false` | Observe the existing controller without transmitting. Requires an RX-only UART with neither `tx_pin` nor `uart.flow_control_pin`. Control methods are ignored. Complete the [receive-only hardware modification](docs/wiring.md) before using this mode. |
+| `communication_timeout` | `120s` | Maximum age of any valid bus frame for `communication_ok` to remain true. This measures bus activity; controller requests alone can keep it true. |
+| `sensor_timeout` | `300s` | Maximum age of each decoded telemetry register in passive/query monitoring. Numeric values become unknown, current text becomes `Unknown`, and fault/humidity binary states are invalidated. Identity fields also expire; `last_fault` retains history. Countdown sensors use the shorter of this value and 10 seconds. |
+| `log_packets` | `false` | Log full packet hex, direction, and classification at INFO. |
+| `log_unknown_registers` | `false` | Log unknown register details at DEBUG; requires `logger.level: DEBUG` to see them. |
+| `register_discovery` | `false` | Observe register traffic and log cumulative request/response counts and diagnostics once per minute at INFO. Does not transmit a register scan. |
+| `experimental_query` | `false` | Enable experimental read probes alongside an existing VTTOUCH. Requires `passive_mode: false` and transmit-capable hardware. Normal controller writes are disabled. See query settings below. |
+| `query_source_address` | `0x13` | Query source address, from `0x12` through `0x1F`. Address `0x12` requires explicit shared-address opt-in. |
+| `query_allow_shared_address` | `false` | Permit using the VTTOUCH address. Requires `experimental_query: true` and `query_source_address: 0x12`. |
+| `query_uart_direction` | `false` | Let the UART driver control RS485 transmit direction for experimental queries. Requires `experimental_query: true` and `uart.flow_control_pin`; omit `broan.flow_control_pin`. |
+| `query_tolerant_mode` | `false` | Query mode with a 1500 ms reply timeout and a limited parser-error budget instead of strict 500 ms handling. Requires experimental queries with a separate source address; cannot use `query_allow_shared_address`. |
+| `query_recovery_mode` | `false` | Enable shared-address query recovery handling, including pause/backoff during continuous polling. Requires experimental queries, `query_allow_shared_address: true`, and `query_tolerant_mode: false`. |
+
+Both timeouts accept ESPHome duration values from `1ms` through `2147483647ms`. Defaults select active controller replacement. Passive mode and experimental queries are mutually exclusive. Experimental queries can disturb the existing controller exchange; use the dedicated examples and observe `query_status` when testing.
+
+With software query direction (the default), configure `broan.flow_control_pin` and omit `uart.flow_control_pin`. With `query_uart_direction: true`, configure only `uart.flow_control_pin`. The following examples demonstrate the supported combinations:
+
+| Example | Purpose |
+| --- | --- |
+| [adu-broan-erv.yaml](examples/adu-broan-erv.yaml) | Passive monitoring on the ADU Waveshare board. |
+| [active-controller.yaml](examples/active-controller.yaml) | Active controller replacement with controls and humidity input. |
+| [experimental-query.yaml](examples/experimental-query.yaml) | Separate-address, strict queries using local component sources. |
+| [adu-broan-erv-query.yaml](examples/adu-broan-erv-query.yaml) | Separate-address, tolerant queries using Git sources. |
+| [adu-broan-erv-shared-query.yaml](examples/adu-broan-erv-shared-query.yaml) | Shared-address, strict queries and an opt-in telemetry polling switch. |
+| [adu-broan-erv-uart-query.yaml](examples/adu-broan-erv-uart-query.yaml) | Shared-address queries with UART-controlled transmit direction. |
+| [adu-broan-erv-recovery-query.yaml](examples/adu-broan-erv-recovery-query.yaml) | Shared-address recovery mode and bounded query trial buttons. |
+| [adu-broan-erv-phase-query.yaml](examples/adu-broan-erv-phase-query.yaml) | Probes timed after selected VTTOUCH register groups. |
+
+Query trial, polling, and phase buttons/switches in these examples use ESPHome template entities and C++ lambdas; they are not additional `platform: broan` settings. Enabling `experimental_query` permits probes; use the example controls to request them.
+
+### Entity configuration
+
+All entity keys below are optional. Add them under an entry with `platform: broan` in the indicated ESPHome domain. Each entry accepts `broan_id` to reference the parent component (automatically resolved when unambiguous). Each entity accepts its normal ESPHome options, such as `name`, `id`, `icon`, `internal`, and `disabled_by_default`; sensors also accept filters. For example:
+
+```yaml
+broan:
+  id: erv
+  uart_id: rs485
+  passive_mode: true
+
+sensor:
+  - platform: broan
+    broan_id: erv
+    supply_fan_rpm:
+      name: Supply Fan RPM
+      id: supply_rpm
 ```
+
+This passive snippet requires an RX-only `uart` configured separately. Telemetry is published when the ERV returns the corresponding register. A configured entity does not guarantee your model or existing controller supplies it. See [entities and freshness](docs/entities.md) for availability behavior and diagnostic template sensors.
+
+#### Numeric sensors (`sensor`)
+
+| Key | Unit | Meaning |
+| --- | --- | --- |
+| `power` | W | Instantaneous power reported by the ERV. |
+| `temperature` | °C | Intake air temperature; may read high. |
+| `temperature_out` | °C | Exhaust air temperature, if supported. |
+| `filter_life` | d | Remaining filter life, converted from seconds to days by the component. Do not apply another seconds-to-days filter. |
+| `supply_fan_cfm` | CFM | Reported supply airflow. |
+| `exhaust_fan_cfm` | CFM | Reported exhaust airflow. |
+| `supply_fan_rpm` | RPM | Supply fan motor speed. |
+| `exhaust_fan_rpm` | RPM | Exhaust fan motor speed. |
+| `humidity_target` | % | Observed target humidity; read-only counterpart to the setpoint control. |
+| `intermittent_on_time` | min | Observed intermittent duration, converted from register seconds to minutes. |
+| `bath_boost_remaining` | s | Reported bath boost countdown. Values above 86400 seconds are rejected. Becomes unknown after at most 10 seconds without a fresh sample; does not extrapolate a countdown between samples. |
+| `turbo_remaining` | s | Reported turbo countdown, with the same validation and expiry as bath boost. |
+| `fault_code` | None | Raw numeric fault code; `-1` means OK. |
+| `warning_code` | None | Raw numeric warning code; `-1` means OK. |
+| `base_mode_code` | None | Raw numeric configured/base mode code. |
+| `active_mode_code` | None | Raw numeric current operating mode code. |
+
+#### Text sensors (`text_sensor`)
+
+| Key | Meaning |
+| --- | --- |
+| `fault_code` | Current fault as `OK` or `E<number>`. |
+| `warning_code` | Current warning as `OK` or `W<number>`. |
+| `last_fault` | Most recently observed non-OK fault with boot-relative observation time. Retained when the fault clears or goes stale; resets on reboot. |
+| `active_mode` | Current operation as Idle, Running, Max, Turbo, Manual, or a raw code. |
+| `base_mode` | Configured/base mode as a raw code string. |
+| `model` | ERV model identity string. |
+| `firmware` | Firmware identity string. |
+| `firmware_version` | Firmware version as dotted bytes. |
+| `hardware_revision` | Hardware revision as dotted bytes. |
+| `query_status` | Experimental query state, including wait, cooldown, recovery, and lockout information. |
+
+The numeric and text `fault_code`/`warning_code` keys are separate entities under their respective domains and can be enabled together.
+
+#### Binary sensors (`binary_sensor`)
+
+| Key | Meaning |
+| --- | --- |
+| `fault_active` | True for a current non-OK fault, false for OK, unknown when fault telemetry is missing or stale in monitoring mode. |
+| `fault_data_available` | True while a decoded fault register is younger than `sensor_timeout`; false before the first sample or after expiry. |
+| `communication_ok` | True while any valid bus frame is younger than `communication_timeout`; starts false. Does not establish ERV health or individual sensor freshness. |
+| `humidity_control_enabled` | Observed humidity-control enable state; unknown when missing or stale in monitoring mode. |
+
+#### Controls (`select`, `number`, `switch`, `button`)
+
+Use these for active controller replacement. Omit them on passive/query devices: their control methods are ignored in both modes.
+
+| Domain | Key | Values and behavior |
+| --- | --- | --- |
+| `select` | `fan_mode` | Options: `off`, `min`, `max`, `int`, `manual`, `turbo`, `humidity`, `recirculate`, `smart`, `ovr`. Model support varies. The current setter falls back to `off` for `ovr`; use the dry-contact remote for override. |
+| `number` | `fan_speed` | 0–100%, step 10. Sets manual/medium airflow between the configured min and max CFM; 50% is the midpoint. Requires valid min/max values from the ERV. |
+| `number` | `humidity_setpoint` | 30–55%, step 5. Target for humidity control. Supply current humidity separately using `setCurrentHumidity()` as described above. |
+| `number` | `intermittent_period` | 10–50000, step 1. Writes the intermittent duration register directly in seconds (the entity's default unit label is `Period`). For 20 minutes on per hour, use `1200`. The read-only `intermittent_on_time` sensor reports minutes. |
+| `switch` | `humidity_control` | Enable or disable humidity control using the target and externally supplied current humidity. |
+| `button` | `filter_reset` | Reset filter life to 7884000 seconds (about 3 months). |
+
+### Active controller YAML example
+
+Add this to an existing ESPHome device config for **controller replacement**. Adjust UART pins and add `broan.flow_control_pin` if your transceiver requires it. For observation alongside a VTTOUCH, use the passive example above instead.
+
+```yaml
 external_components:
   - source:
       type: git
@@ -110,8 +235,7 @@ number:
     fan_speed:
       name: "fan speed"
 
-    # How many seconds ON per hour in int mode (eg, a value of 20 means the ERV will run
-    # 20 minutes on 40 minutes off every hour )
+    # Seconds ON per hour in int mode: 1200 means 20 minutes on, 40 minutes off.
     intermittent_period:
       name: "Intermittent Period"
 
