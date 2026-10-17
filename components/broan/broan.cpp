@@ -344,8 +344,19 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 			
 
 		}
-
-		
+        if (unField == BathBoostRemaining || unField == TurboRemaining) {
+            const auto seconds = pField->m_value.m_nValue;
+            if (seconds > 86400U) {
+                expireField(unField);
+                field_seen_[unField] = false;
+                field_stale_[unField] = true;
+                continue;
+            }
+#ifdef USE_SENSOR
+            auto *countdown = unField == BathBoostRemaining ? bath_boost_remaining_sensor_ : turbo_remaining_sensor_;
+            if (countdown) countdown->publish_state(static_cast<float>(seconds));
+#endif
+        }
 #ifdef USE_SENSOR
         if (unField == BroanField::TargetHumidityA && humidity_target_sensor_)
             humidity_target_sensor_->publish_state(pField->m_value.m_flValue);

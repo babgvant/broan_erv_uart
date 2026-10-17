@@ -5,6 +5,12 @@ broan:
   query_recovery_mode: true
 
 sensor:
+  - platform: broan
+    bath_boost_remaining:
+      name: Bath Boost Remaining
+    turbo_remaining:
+      name: Turbo Remaining
+      disabled_by_default: true
   - platform: template
     name: Telemetry Last Successful Update Age
     entity_category: diagnostic

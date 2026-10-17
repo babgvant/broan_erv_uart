@@ -59,6 +59,7 @@ struct Fixture {
 #include "test_probe_phase.h"
 #include "test_probe_recovery.h"
 #include "test_polling_recovery.h"
+#include "test_countdown.h"
 
 int main() {
   run_probe_tests();
@@ -70,6 +71,7 @@ int main() {
   run_phase_probe_tests();
   run_recovery_probe_tests();
   run_polling_recovery_tests();
+  run_countdown_tests();
   {
     Fixture f;
     sensor::Sensor humidity, minutes;

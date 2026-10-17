@@ -45,6 +45,14 @@ CONFIG_SCHEMA = cv.Schema(
             unit_of_measurement="min", accuracy_decimals=0,
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
         ),
+        cv.Optional("bath_boost_remaining"): sensor.sensor_schema(
+            unit_of_measurement="s", accuracy_decimals=0,
+            device_class="duration",
+        ),
+        cv.Optional("turbo_remaining"): sensor.sensor_schema(
+            unit_of_measurement="s", accuracy_decimals=0,
+            device_class="duration", entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
         cv.Optional(CONF_POWER): sensor.sensor_schema(
             device_class=DEVICE_CLASS_POWER,
             icon=ICON_POWER,
@@ -102,7 +110,7 @@ CONFIG_SCHEMA = cv.Schema(
 
 async def to_code(config):
     broan_component = await cg.get_variable(config[CONF_BROAN_ID])
-    for key in ("humidity_target", "intermittent_on_time"):
+    for key in ("humidity_target", "intermittent_on_time", "bath_boost_remaining", "turbo_remaining"):
         if key in config:
             sens = await sensor.new_sensor(config[key])
             cg.add(getattr(broan_component, f"set_{key}_sensor")(sens))

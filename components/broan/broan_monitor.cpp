@@ -22,7 +22,9 @@ void BroanComponent::updateFreshness() {
     communication_ok_binary_sensor_->publish_state(have_valid_packet_ && now - last_valid_packet_ < communication_timeout_);
 #endif
   for (uint32_t field = 0; field < BroanField::MAX_FIELDS; ++field) {
-    if (!field_stale_[field] && (!field_seen_[field] || now - received_at_[field] >= sensor_timeout_)) {
+    const uint32_t timeout = field == BathBoostRemaining || field == TurboRemaining ?
+        std::min<uint32_t>(sensor_timeout_, 10000U) : sensor_timeout_;
+    if (!field_stale_[field] && (!field_seen_[field] || now - received_at_[field] >= timeout)) {
       expireField(field);
       field_stale_[field] = true;
     }
@@ -59,6 +61,8 @@ void BroanComponent::updateFreshness() {
 void BroanComponent::expireField(uint32_t field) {
   switch (field) {
 #ifdef USE_SENSOR
+    case BathBoostRemaining: if (bath_boost_remaining_sensor_) bath_boost_remaining_sensor_->publish_state(NAN); break;
+    case TurboRemaining: if (turbo_remaining_sensor_) turbo_remaining_sensor_->publish_state(NAN); break;
     case TargetHumidityA: if (humidity_target_sensor_) humidity_target_sensor_->publish_state(NAN); break;
     case IntModeDuration: if (intermittent_on_time_sensor_) intermittent_on_time_sensor_->publish_state(NAN); break;
     case Wattage: if (power_sensor_) power_sensor_->publish_state(NAN); break;

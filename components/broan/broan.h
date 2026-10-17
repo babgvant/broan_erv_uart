@@ -126,6 +126,8 @@ enum BroanField
 	Model,
 	FirmwareVersion,
 	HardwareRevision,
+	BathBoostRemaining,
+	TurboRemaining,
 
 	MAX_FIELDS,
 };
@@ -183,6 +185,8 @@ class BroanComponent : public Component, public uart::UARTDevice
 	SUB_SENSOR(active_mode_code)
 	SUB_SENSOR(humidity_target)
 	SUB_SENSOR(intermittent_on_time)
+	SUB_SENSOR(bath_boost_remaining)
+	SUB_SENSOR(turbo_remaining)
 #endif
 
 #ifdef USE_SELECT
@@ -278,6 +282,8 @@ public:
 		{ 0x02, 0x60, BroanFieldType::String,  {0}, UPDATE_RATE_ONCE }, // Model
 		{ 0x01, 0x00, BroanFieldType::String,  {0}, UPDATE_RATE_ONCE }, // Firmware Version
 		{ 0x01, 0x60, BroanFieldType::String,  {0}, UPDATE_RATE_ONCE }, // Hardware Revision
+		{ 0x03, 0x30, BroanFieldType::Int, {0}, UPDATE_RATE_NEVER },
+		{ 0x04, 0x30, BroanFieldType::Int, {0}, UPDATE_RATE_NEVER },
 /*
 		// Unknown fields scanned by the VTSPEEDW
 		{ 0x02, 0x30, BroanFieldType::Byte, {0}, UPDATE_RATE_SLOW }, // Unknown. 1. Set to 0 in TURBO mode
