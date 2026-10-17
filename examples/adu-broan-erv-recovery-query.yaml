@@ -4,6 +4,10 @@ packages:
 broan:
   query_recovery_mode: true
 
+switch:
+  - id: !extend broan_telemetry_polling
+    restore_mode: ALWAYS_ON
+
 sensor:
   - platform: broan
     bath_boost_remaining:

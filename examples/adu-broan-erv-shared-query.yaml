@@ -9,6 +9,7 @@ broan:
 
 switch:
   - platform: template
+    id: broan_telemetry_polling
     name: Telemetry Polling
     entity_category: diagnostic
     restore_mode: ALWAYS_OFF
