@@ -53,7 +53,12 @@ void BroanComponent::setProbeStatus(const char *status) {
 #endif
 }
 
-void BroanComponent::lockProbe(const char *reason) {
+void BroanComponent::lockProbe(const char *reason, bool permanent) {
+  if (!permanent && !query_hard_lock_ && query_recovery_mode_ && query_polling_ && !query_trial_) {
+    pauseProbePolling(reason);
+    return;
+  }
+  query_hard_lock_ |= permanent;
   if (query_state_ == QueryState::WAITING || query_state_ == QueryState::OBSERVING) logProbeResult("locked");
   query_loop_.stop();
   query_release_pending_ = false;
@@ -63,6 +68,82 @@ void BroanComponent::lockProbe(const char *reason) {
   query_state_ = QueryState::LOCKED;
   query_window_ = false;
   setProbeStatus(reason);
+}
+
+void BroanComponent::pauseProbePolling(const char *reason, bool failure) {
+  if (query_state_ == QueryState::WAITING || query_state_ == QueryState::OBSERVING) {
+    logProbeResult("paused");
+    if (query_automatic_) query_poll_index_ = (query_poll_index_ + 1) % 5;
+  }
+  if (failure) {
+    if (query_poll_faults_ < 5) ++query_poll_faults_;
+    query_poll_backoff_ms_ = std::min(60000U << (query_poll_faults_ - 1), 900000U);
+    query_poll_pause_at_ = millis();
+    query_poll_successes_ = 0;
+  }
+  query_loop_.stop();
+  query_state_ = QueryState::PAUSED;
+  query_release_pending_ = query_window_ = touch_yielded_ = query_phase_ready_ = false;
+  query_automatic_ = query_poll_healthy_ = false;
+  query_poll_mode_wait_ = false;
+  if (failure) {
+    touch_transaction_pending_ = false;
+    touch_request_fields_.clear();
+  }
+  touch_verified_reads_ = 0;
+  have_touch_read_reply_ = false;
+  query_poll_invalid_baseline_ = framer_.invalid;
+  std::string detail(reason);
+  if (detail.find("Locked: ") == 0) detail.erase(0, 8);
+  const auto suffix = detail.find("; reboot required");
+  if (suffix != std::string::npos) detail.erase(suffix);
+  char status[240];
+  snprintf(status, sizeof(status), "Polling paused: %s; automatic recovery, backoff=%us", detail.c_str(),
+           (unsigned) (query_poll_backoff_ms_ / 1000));
+  setProbeStatus(status);
+}
+
+void BroanComponent::observePollingRecovery(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload) {
+  if (!is_touch_traffic(sender, target, payload)) {
+    touch_verified_reads_ = 0;
+    query_poll_healthy_ = false;
+    return;
+  }
+  const bool matched = observeTouchTransaction(sender, target, payload);
+  if (sender == m_nServerAddress && (payload[0] == 0x21 || payload[0] == 0x41) && !matched) {
+    touch_verified_reads_ = 0;
+    query_poll_healthy_ = false;
+  }
+}
+
+void BroanComponent::updatePollingRecovery() {
+  if (!query_polling_) return;
+  if (framer_.invalid != query_poll_invalid_baseline_) {
+    query_poll_invalid_baseline_ = framer_.invalid;
+    touch_verified_reads_ = 0;
+    query_poll_healthy_ = false;
+  }
+  const uint32_t now = millis();
+  if (!touch_mode_readback_.empty() && !query_poll_mode_wait_ &&
+      static_cast<uint32_t>(now - touch_mode_write_at_) >= 10000) {
+    query_poll_mode_wait_ = true;
+    setProbeStatus("Polling paused: Touch mode readback unconfirmed; awaiting readback or a newer mode command");
+  }
+  if (touch_verified_reads_ < 3 || !have_touch_read_reply_ || !touch_mode_readback_.empty() ||
+      static_cast<uint32_t>(now - touch_last_read_reply_) >= 1500) {
+    query_poll_healthy_ = false;
+    return;
+  }
+  if (!query_poll_healthy_) {
+    query_poll_healthy_ = true;
+    query_poll_healthy_at_ = now;
+  }
+  if (static_cast<uint32_t>(now - query_poll_pause_at_) < query_poll_backoff_ms_ ||
+      static_cast<uint32_t>(now - query_poll_healthy_at_) < (query_poll_faults_ ? 10000U : 0U) ||
+      !recoveryReady() || touch_transaction_pending_ || framer_.has_pending_bytes() || available()) return;
+  query_state_ = QueryState::IDLE;
+  query_poll_invalid_baseline_ = framer_.invalid;
+  setProbeStatus("Telemetry polling ready; waiting for next safe read");
 }
 
 bool BroanComponent::request_probe(uint16_t opcode, uint32_t idle_ms, uint16_t after_phase) {
@@ -149,7 +230,20 @@ bool BroanComponent::request_probe_with_release(uint16_t opcode, uint32_t idle_m
 bool BroanComponent::start_probe_polling() {
   if (query_polling_) return true;
   if (!experimental_query_ || passive_mode_ || !query_allow_shared_address_ || query_source_address_ != 0x12 ||
-      query_tolerant_mode_ || !probeDirectionValid() || query_state_ != QueryState::IDLE) return false;
+      query_tolerant_mode_ || !probeDirectionValid() || query_hard_lock_) return false;
+  if (query_recovery_mode_ && !query_trial_) {
+    query_poll_index_ = 0;
+    query_poll_idle_ms_ = query_reply_received_ ? query_idle_ms_ : 5;
+    query_poll_phase_ = query_reply_received_ ? query_phase_filter_ : 0;
+    query_poll_invalid_baseline_ = framer_.invalid;
+    query_polling_ = true;
+    if (query_state_ == QueryState::LOCKED) pauseProbePolling("previous probe stopped");
+    else if (query_state_ == QueryState::IDLE || query_state_ == QueryState::PAUSED)
+      pauseProbePolling("waiting for verified Touch traffic and write quiet period", false);
+    else setProbeStatus("Telemetry polling enabled; waiting for current probe");
+    return true;
+  }
+  if (query_state_ != QueryState::IDLE) return false;
   if (!have_touch_read_reply_ || static_cast<uint32_t>(millis() - touch_last_read_reply_) >= 1500) {
     setProbeStatus("Polling refused: waiting for verified Touch traffic");
     return false;
@@ -174,8 +268,11 @@ bool BroanComponent::start_probe_polling() {
 bool BroanComponent::start_probe_trial() {
   if (!query_recovery_mode_ || query_polling_ || query_state_ != QueryState::IDLE ||
       (query_sent_ && static_cast<uint32_t>(millis() - query_sent_at_) < 60000)) return false;
-  if (!start_probe_polling()) return false;
   query_trial_ = true;
+  if (!start_probe_polling()) {
+    query_trial_ = false;
+    return false;
+  }
   query_trial_remaining_ = 5;
   query_poll_idle_ms_ = 5;
   query_poll_phase_ = 0;
@@ -187,6 +284,12 @@ void BroanComponent::stop_probe_polling() {
   query_polling_ = false;
   query_trial_ = false;
   query_trial_remaining_ = 0;
+  query_poll_healthy_ = false;
+  if (query_state_ == QueryState::PAUSED) {
+    query_state_ = QueryState::IDLE;
+    setProbeStatus("Telemetry polling stopped; automatic recovery cancelled");
+    return;
+  }
   if (query_state_ == QueryState::QUEUED && query_automatic_) {
     query_loop_.stop();
     query_window_ = false;
@@ -199,8 +302,14 @@ void BroanComponent::stop_probe_polling() {
 
 void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload) {
   if (query_state_ == QueryState::LOCKED) return;
-  if (!checkProbeErrors()) return;
-  if (!checkTouchWriteTimeout()) return;
+  if (query_state_ == QueryState::PAUSED) {
+    observePollingRecovery(sender, target, payload);
+    return;
+  }
+  if (!checkProbeErrors() || !checkTouchWriteTimeout()) {
+    if (query_state_ == QueryState::PAUSED) observePollingRecovery(sender, target, payload);
+    return;
+  }
   if (query_state_ == QueryState::WAITING && static_cast<uint32_t>(millis() - query_sent_at_) >= probeReplyTimeout())
     handleProbeTimeout();
   if (query_state_ == QueryState::LOCKED) return;
@@ -232,6 +341,10 @@ void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vec
   bool touch_reply = false;
   if (query_allow_shared_address_ || query_phase_filter_ || query_state_ == QueryState::WAITING || query_state_ == QueryState::OBSERVING)
     touch_reply = observeTouchTransaction(sender, target, payload);
+  if (query_state_ == QueryState::PAUSED) {
+    observePollingRecovery(sender, target, payload);
+    return;
+  }
   if (query_state_ == QueryState::LOCKED) return;
   if (query_allow_shared_address_ && (query_polling_ || query_state_ == QueryState::WAITING || query_state_ == QueryState::OBSERVING)) {
     if (!is_touch_traffic(sender, target, payload)) {
@@ -333,8 +446,12 @@ void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vec
 
 void BroanComponent::updateProbe() {
   if (!experimental_query_ || passive_mode_) return;
-  const uint32_t now = millis();
   if (!checkTouchWriteTimeout()) return;
+  if (query_state_ == QueryState::PAUSED) {
+    updatePollingRecovery();
+    return;
+  }
+  const uint32_t now = millis();
   if (query_polling_ && query_state_ == QueryState::QUEUED &&
       (!have_touch_read_reply_ || static_cast<uint32_t>(now - touch_last_read_reply_) >= (query_recovery_mode_ ? 10000U : 1500U))) {
     lockProbe("Locked: Touch traffic lost before polling read; reboot required");
@@ -378,12 +495,22 @@ void BroanComponent::updateProbe() {
         lockProbe(query_reply_received_ ? "Locked: bus did not resume after reply; reboot required" :
                   "Locked: Touch did not recover after unanswered probe; reboot required");
       } else {
+        if (!query_reply_received_ && query_recovery_mode_ && query_polling_ && !query_trial_) {
+          ++query_failures_;
+          pauseProbePolling("telemetry reply missing; Touch recovered");
+          return;
+        }
         if (query_reply_received_) query_failures_ = 0;
         else if (++query_failures_ >= 3) {
           lockProbe("Locked: three consecutive unanswered probes; reboot required");
           return;
         }
         logProbeResult(query_reply_received_ ? "reply" : "no_reply");
+        if (query_reply_received_ && query_recovery_mode_ && query_polling_ && !query_trial_ && ++query_poll_successes_ >= 3) {
+          query_poll_faults_ = 0;
+          query_poll_backoff_ms_ = 0;
+          query_poll_successes_ = 0;
+        }
         query_state_ = QueryState::IDLE;
         if (query_automatic_) query_poll_index_ = (query_poll_index_ + 1) % 5;
         if (query_trial_ && query_trial_remaining_ == 0) {
@@ -401,6 +528,10 @@ void BroanComponent::updateProbe() {
     return;
   }
   if (static_cast<uint32_t>(now - query_queued_at_) >= 30000) {
+    if (query_recovery_mode_ && query_polling_ && !query_trial_) {
+      pauseProbePolling("no eligible handoff in 30s; nothing transmitted");
+      return;
+    }
     query_loop_.stop();
     query_state_ = QueryState::IDLE;
     const bool polling = query_polling_;
@@ -487,7 +618,7 @@ bool BroanComponent::transmitProbePacket(const std::vector<uint8_t> &packet) {
            (unsigned) ((packet.size() * 10000000UL + 38399) / 38400), (unsigned) result);
   if (result != uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS &&
       result != uart::UARTFlushResult::UART_FLUSH_RESULT_ASSUMED_SUCCESS) {
-    lockProbe("Locked: UART transmit did not complete; reboot required");
+    lockProbe("Locked: UART transmit did not complete; reboot required", true);
     return false;
   }
   return true;
@@ -498,6 +629,19 @@ bool BroanComponent::observeTouchTransaction(uint8_t sender, uint8_t target, con
       payload[0] == 0x21 && valid_register_payload(payload)) {
     for (size_t i = 1; i < payload.size(); i += 3 + payload[i + 2]) {
       const uint16_t field = (payload[i] << 8) | payload[i + 1];
+      if (field == 0x0220 && (payload[i + 2] == 1 || payload[i + 2] == 4)) {
+        const auto mode = touch_mode_readback_.find(0x0020);
+        if (mode != touch_mode_readback_.end() && mode->second.size() == 1) {
+          const uint8_t code = mode->second[0];
+          if ((code == 1 || code == 8 || code == 9 || code == 10 || code == 11 || code == 17) &&
+              payload[i + 3] == code && std::all_of(payload.begin() + i + 4,
+                  payload.begin() + i + 3 + payload[i + 2], [](uint8_t byte) { return byte == 0; })) {
+            ESP_LOGI("broan_probe", "Touch mode register 0020 confirmed by ERV base-mode readback after %ums",
+                     (unsigned) (millis() - touch_mode_write_at_));
+            touch_mode_readback_.erase(mode);
+          }
+        }
+      }
       auto expected = touch_mode_readback_.find(field);
       if (expected != touch_mode_readback_.end() && expected->second ==
           std::vector<uint8_t>(payload.begin() + i + 3, payload.begin() + i + 3 + payload[i + 2])) {
@@ -512,8 +656,11 @@ bool BroanComponent::observeTouchTransaction(uint8_t sender, uint8_t target, con
     if (query_state_ == QueryState::QUEUED) query_phase_ready_ = false;
     if (touch_transaction_pending_) {
       if (query_recovery_mode_ && touch_reply_type_ == 0x41) {
-        lockProbe("Locked: Touch write unacknowledged before next transaction; reboot required");
-        return false;
+        if (query_state_ == QueryState::PAUSED) pauseProbePolling("Touch write unacknowledged during recovery");
+        else {
+          lockProbe("Locked: Touch write unacknowledged before next transaction; reboot required");
+          return false;
+        }
       }
       if (!query_recovery_mode_ && (query_polling_ || query_state_ != QueryState::IDLE) &&
           (!query_tolerant_mode_ || query_state_ == QueryState::QUEUED || ++query_resyncs_ > 2)) {
@@ -525,6 +672,7 @@ bool BroanComponent::observeTouchTransaction(uint8_t sender, uint8_t target, con
       if (query_recovery_mode_) {
         ++query_resyncs_;
         touch_verified_reads_ = 0;
+        query_poll_healthy_ = false;
       }
       ESP_LOGI("broan_probe", "Probe %u Touch transaction resync=%u at +%ums", (unsigned) query_attempts_,
                (unsigned) query_resyncs_, (unsigned) (millis() - query_sent_at_));
@@ -550,6 +698,7 @@ bool BroanComponent::observeTouchTransaction(uint8_t sender, uint8_t target, con
         for (size_t i = 1; i < payload.size(); i += 3 + payload[i + 2]) {
           const uint16_t field = (payload[i] << 8) | payload[i + 1];
           if (field == 0x0020 || field == 0x0820) {
+            query_poll_mode_wait_ = false;
             touch_mode_readback_[field] = std::vector<uint8_t>(payload.begin() + i + 3,
                 payload.begin() + i + 3 + payload[i + 2]);
             touch_mode_write_at_ = millis();
@@ -625,6 +774,13 @@ bool BroanComponent::checkProbeErrors() {
 bool BroanComponent::checkTouchWriteTimeout() {
   if (!query_recovery_mode_) return true;
   if (query_state_ == QueryState::LOCKED) return false;
+  if (query_state_ == QueryState::PAUSED) {
+    if (touch_transaction_pending_ && touch_reply_type_ == 0x41 &&
+        static_cast<uint32_t>(millis() - touch_request_at_) >= 1500) {
+      pauseProbePolling("Touch write acknowledgement timeout during recovery");
+    }
+    return true;
+  }
   if (!touch_mode_readback_.empty() && static_cast<uint32_t>(millis() - touch_mode_write_at_) >= 10000) {
     lockProbe("Locked: Touch mode readback not confirmed within 10s; reboot required");
     return false;

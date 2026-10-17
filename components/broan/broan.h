@@ -352,7 +352,7 @@ public:
 	void setIntermittentPeriod( uint32_t period );
 
 private:
-	enum class QueryState { IDLE, QUEUED, WAITING, OBSERVING, LOCKED };
+	enum class QueryState { IDLE, QUEUED, WAITING, OBSERVING, PAUSED, LOCKED };
 	bool experimental_query_{false}, query_window_{false}, touch_yielded_{false}, query_sent_{false};
 	bool query_uart_direction_{false};
 	bool query_touch_request_{false}, query_recovered_{false};
@@ -375,6 +375,9 @@ private:
 	bool query_release_enabled_{false}, query_release_pending_{false}, query_release_sent_{false}, query_release_ack_{false};
 	uint32_t query_release_at_{0}, query_release_ack_ms_{0};
 	bool query_polling_{false}, query_automatic_{false}, have_touch_read_reply_{false};
+	bool query_poll_healthy_{false}, query_hard_lock_{false}, query_poll_mode_wait_{false};
+	uint8_t query_poll_faults_{0}, query_poll_successes_{0};
+	uint32_t query_poll_pause_at_{0}, query_poll_backoff_ms_{0}, query_poll_healthy_at_{0};
 	uint8_t query_poll_index_{0};
 	uint32_t touch_last_read_reply_{0}, query_poll_invalid_baseline_{0};
 	uint8_t touch_reply_type_{0};
@@ -392,7 +395,10 @@ private:
 	void observeProbe(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload);
 	bool observeTouchTransaction(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload);
 	void setProbeStatus(const char *status);
-	void lockProbe(const char *reason);
+	void lockProbe(const char *reason, bool permanent = false);
+	void pauseProbePolling(const char *reason, bool failure = true);
+	void updatePollingRecovery();
+	void observePollingRecovery(uint8_t sender, uint8_t target, const std::vector<uint8_t> &payload);
 	bool checkProbeErrors();
 	bool checkTouchWriteTimeout();
 	bool recoveryReady(bool require_quiet = true) const;
