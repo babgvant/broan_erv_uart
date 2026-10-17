@@ -329,6 +329,9 @@ public:
 	bool start_probe_trial();
 	void stop_probe_polling();
 	bool get_probe_polling() const { return query_polling_; }
+	float get_last_probe_success_age() const {
+		return have_probe_success_ ? (probe_success_age_ms_ + static_cast<uint32_t>(millis() - probe_success_tick_)) / 1000.0f : NAN;
+	}
 	void set_communication_timeout(uint32_t value) { communication_timeout_ = value; }
 	void set_sensor_timeout(uint32_t value) { sensor_timeout_ = value; }
 	void set_log_packets(bool value) { log_packets_ = value; }
@@ -364,6 +367,9 @@ private:
 	uint32_t touch_mode_write_at_{0};
 	std::map<uint16_t, std::vector<uint8_t>> touch_mode_readback_;
 	uint32_t query_attempts_{0}, query_failures_{0}, query_resyncs_{0}, query_rtt_{0};
+	bool have_probe_success_{false};
+	uint32_t probe_success_tick_{0};
+	uint64_t probe_success_age_ms_{0};
 	uint32_t query_checksum_baseline_{0}, query_reported_errors_{0}, query_last_touch_reply_{0};
 	uint32_t query_idle_ms_{5};
 	uint32_t query_poll_idle_ms_{5};

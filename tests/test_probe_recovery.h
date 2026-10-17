@@ -17,6 +17,29 @@ struct RecoveryFixture : SharedFixture {
 };
 
 void run_recovery_probe_tests() {
+  for (uint32_t start : {100U, UINT32_MAX - 500U}) {
+    RecoveryFixture f;
+    test_now = start;
+    assert(std::isnan(f.component.get_last_probe_success_age()));
+    f.ready();
+    f.send();
+    f.normal();
+    assert(std::isnan(f.component.get_last_probe_success_age()));
+    receive(f.component, 0x10, 0x12, value(0x05, 0x10, 45));
+    assert(f.component.get_last_probe_success_age() == 0);
+    test_now += 2000;
+    assert(f.component.get_last_probe_success_age() == 2);
+    f.component.loop();
+    f.component.stop_probe_polling();
+    test_now += 3000;
+    f.component.loop();
+    assert(f.component.get_last_probe_success_age() == 5);
+    test_now += UINT32_MAX - 10000U;
+    f.component.loop();
+    test_now += 20000;
+    f.component.loop();
+    assert(f.component.get_last_probe_success_age() > 4294967.0f);
+  }
   for (uint32_t start : {100U, UINT32_MAX - 5}) {
     RecoveryFixture f;
     test_now = start;

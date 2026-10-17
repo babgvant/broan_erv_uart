@@ -394,6 +394,9 @@ void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vec
       query_state_ = QueryState::OBSERVING;
       query_observe_at_ = millis();
       query_reply_received_ = true;
+      have_probe_success_ = true;
+      probe_success_tick_ = millis();
+      probe_success_age_ms_ = 0;
       query_rtt_ = millis() - query_sent_at_;
       ESP_LOGI("broan_probe", "Reply for %04X after %ums: %s", query_opcode_,
                static_cast<unsigned>(millis() - query_sent_at_), format_hex_pretty(payload).c_str());
@@ -409,6 +412,9 @@ void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vec
     if (late_reply_allowed) {
       if (!query_reply_received_) {
         query_reply_received_ = true;
+        have_probe_success_ = true;
+        probe_success_tick_ = millis();
+        probe_success_age_ms_ = 0;
         query_reply_late_ = true;
         query_rtt_ = millis() - query_sent_at_;
       }
@@ -445,6 +451,11 @@ void BroanComponent::observeProbe(uint8_t sender, uint8_t target, const std::vec
 }
 
 void BroanComponent::updateProbe() {
+  if (have_probe_success_) {
+    const uint32_t tick = millis();
+    probe_success_age_ms_ += static_cast<uint32_t>(tick - probe_success_tick_);
+    probe_success_tick_ = tick;
+  }
   if (!experimental_query_ || passive_mode_) return;
   if (!checkTouchWriteTimeout()) return;
   if (query_state_ == QueryState::PAUSED) {
