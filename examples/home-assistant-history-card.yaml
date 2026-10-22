@@ -1,0 +1,17 @@
+# Dashboard card YAML; do not install this file as an HA package.
+type: vertical-stack
+cards:
+  - type: history-graph
+    title: ERV operation over the last 24 hours
+    hours_to_show: 24
+    entities:
+      - entity: binary_sensor.adu_erv_operating
+        name: Operating
+      - entity: sensor.adu_erv_active_mode
+        name: Active mode
+      - entity: sensor.adu_erv_base_mode
+        name: Configured mode
+  - type: entities
+    entities:
+      - sensor.adu_erv_operating_today
+      - sensor.adu_erv_operating_last_24_hours

@@ -7,6 +7,8 @@ from .. import BroanComponent, CONF_BROAN_ID
 DEPENDENCIES = ["broan"]
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(CONF_BROAN_ID): cv.use_id(BroanComponent),
+    cv.Optional("operating"): binary_sensor.binary_sensor_schema(
+        device_class="running", icon="mdi:fan"),
     cv.Optional("fault_active"): binary_sensor.binary_sensor_schema(
         device_class="problem", entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
     cv.Optional("communication_ok"): binary_sensor.binary_sensor_schema(
@@ -19,7 +21,7 @@ CONFIG_SCHEMA = cv.Schema({
 
 async def to_code(config):
     parent = await cg.get_variable(config[CONF_BROAN_ID])
-    for key in ("fault_active", "communication_ok", "fault_data_available", "humidity_control_enabled"):
+    for key in ("operating", "fault_active", "communication_ok", "fault_data_available", "humidity_control_enabled"):
         if key in config:
             entity = await binary_sensor.new_binary_sensor(config[key])
             cg.add(getattr(parent, f"set_{key}_binary_sensor")(entity))

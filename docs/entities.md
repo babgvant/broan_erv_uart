@@ -20,16 +20,19 @@ The example's friendly name is ADU ERV. Home Assistant generally generates the e
 | `sensor.adu_erv_active_mode_code` | `active_mode_code` | `0720` | raw numeric code |
 | `sensor.adu_erv_fault_code` | text `fault_code` | `1700` | `OK` or `E<number>` |
 | `sensor.adu_erv_warning_code` | text `warning_code` | `1A00` | `OK` or `W<number>` |
-| `sensor.adu_erv_active_mode` | text `active_mode` | `0720` | Idle, Running, Max, Turbo, Manual, or raw code |
+| `sensor.adu_erv_active_mode` | text `active_mode` | `0720` | Idle, Low, High, Turbo, Medium, Bath Override, or raw code |
 | `sensor.adu_erv_base_mode` | text `base_mode` | `0220` | raw code as text |
 | `sensor.adu_erv_model` | text `model` | `0260` | identity string |
 | `sensor.adu_erv_firmware` | text `firmware` | `0200` | identity string |
 | `sensor.adu_erv_firmware_version` | text `firmware_version` | `0100` | dotted bytes |
 | `sensor.adu_erv_hardware_revision` | text `hardware_revision` | `0160` | dotted bytes |
 | `binary_sensor.adu_erv_fault_active` | `fault_active` | `1700` | true for any code except `FFFFFFFF` |
+| `binary_sensor.adu_erv_operating` | `operating` | `0720` | false for 0; true for 1–5; unknown for unrecognized codes or missing/stale telemetry |
 | `sensor.adu_erv_last_fault` | text `last_fault` | `1700` | last non-OK code and boot-relative observation time |
 
 Numeric `fault_code` and `warning_code` are also supported by the sensor platform, with −1 representing OK. They are separate from the existing text platform with the same keys. The previously declared numeric diagnostic schema now has working C++ setters and publishing.
+
+The current mode labels are Idle, Low, High, Turbo, Medium, and Bath Override for codes 0–5. See [operation history](history.md) for a timeline and runtime totals. The `operating` binary sensor follows the reported active mode rather than the configured base mode or measured RPM. Its per-register timeout applies in active controller mode as well as passive/query modes.
 
 ## Freshness behavior
 

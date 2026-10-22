@@ -65,7 +65,11 @@ uart:
 {pins}{settings}broan:
   uart_id: bus
   passive_mode: {str(passive).lower()}
-{options}""")
+{options}binary_sensor:
+  - platform: broan
+    operating:
+      name: ERV Operating
+""")
     result = subprocess.run([sys.executable, "-m", "esphome", "config", str(config)],
                             capture_output=True, text=True)
     assert (result.returncode == 0) == valid, result.stdout + result.stderr

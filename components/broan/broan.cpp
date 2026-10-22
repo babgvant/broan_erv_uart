@@ -61,6 +61,13 @@ void BroanComponent::loop()
     last_rx_byte_ = millis();
     framer_.feed(byte, millis(), receive);
   }
+#ifdef USE_BINARY_SENSOR
+  if (!passive_mode_ && !experimental_query_ && !field_stale_[ActiveMode] &&
+      (!field_seen_[ActiveMode] || millis() - received_at_[ActiveMode] >= sensor_timeout_)) {
+    if (operating_binary_sensor_) operating_binary_sensor_->invalidate_state();
+    field_stale_[ActiveMode] = true;
+  }
+#endif
   if (passive_mode_ || experimental_query_) {
     updateFreshness();
     if (experimental_query_ && !passive_mode_) updateProbe();
@@ -373,6 +380,11 @@ void BroanComponent::parseBroanFields(const std::vector<uint8_t>& message)
 #endif
 
 #ifdef USE_BINARY_SENSOR
+        if (unField == BroanField::ActiveMode && operating_binary_sensor_) {
+            const auto mode = pField->m_value.m_nValue;
+            if (mode <= 5) operating_binary_sensor_->publish_state(mode != 0);
+            else operating_binary_sensor_->invalidate_state();
+        }
         if (unField == BroanField::FaultCode && fault_data_available_binary_sensor_)
             fault_data_available_binary_sensor_->publish_state(true);
         if (unField == BroanField::HumidityControl && humidity_control_enabled_binary_sensor_)

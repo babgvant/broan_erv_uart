@@ -117,6 +117,7 @@ text_sensor:
 
 binary_sensor:
   - platform: broan
+    operating: {name: Operating}
     fault_active: {name: Fault Active}
     fault_data_available: {name: Fault Data Available}
     humidity_control_enabled: {name: Humidity Control Enabled}

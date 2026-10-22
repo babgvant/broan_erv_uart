@@ -1,0 +1,20 @@
+# Install as an HA package, separately or alongside home-assistant-package.yaml.
+# Replace this entity ID with the one in your HA registry.
+sensor:
+  - platform: history_stats
+    name: ADU ERV Operating Today
+    unique_id: adu_erv_operating_today
+    entity_id: binary_sensor.adu_erv_operating
+    state: "on"
+    type: time
+    start: "{{ today_at() }}"
+    end: "{{ now() }}"
+  - platform: history_stats
+    name: ADU ERV Operating Last 24 Hours
+    unique_id: adu_erv_operating_last_24_hours
+    entity_id: binary_sensor.adu_erv_operating
+    state: "on"
+    type: time
+    duration:
+      hours: 24
+    end: "{{ now() }}"

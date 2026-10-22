@@ -221,6 +221,7 @@ class BroanComponent : public Component, public uart::UARTDevice
 #endif
 
 #ifdef USE_BINARY_SENSOR
+	SUB_BINARY_SENSOR(operating)
 	SUB_BINARY_SENSOR(fault_active)
 	SUB_BINARY_SENSOR(communication_ok)
 	SUB_BINARY_SENSOR(fault_data_available)

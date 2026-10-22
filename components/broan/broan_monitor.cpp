@@ -96,6 +96,7 @@ void BroanComponent::expireField(uint32_t field) {
   }
 #endif
 #ifdef USE_BINARY_SENSOR
+  if (field == ActiveMode && operating_binary_sensor_) operating_binary_sensor_->invalidate_state();
   if (field == HumidityControl && humidity_control_enabled_binary_sensor_)
     humidity_control_enabled_binary_sensor_->invalidate_state();
   if (field == FaultCode && fault_active_binary_sensor_) fault_active_binary_sensor_->invalidate_state();

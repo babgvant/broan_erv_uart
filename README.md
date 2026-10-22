@@ -12,6 +12,8 @@ Use the complete [ADU Waveshare example](examples/adu-broan-erv.yaml), after com
 
 See [protocol and architecture](docs/protocol.md), [entities and freshness](docs/entities.md), [validation and traffic capture](docs/validation.md), and [Home Assistant alerts](examples/home-assistant-package.yaml). Candidate telemetry appears only when the existing ERV traffic carries it; VTTOUCH polling and E38 availability still require field captures.
 
+To see when the ERV ran earlier today, follow [operation history in Home Assistant](docs/history.md). It includes an active/idle timeline and runtime helpers.
+
 Currently this project is stable, but may be missing some advanced features from certain models. If there is a feature you'd like added, please open an issue. We may need packet capture from a unit with this functionality.
 
 <table>
@@ -163,7 +165,7 @@ This passive snippet requires an RX-only `uart` configured separately. Telemetry
 | `fault_code` | Current fault as `OK` or `E<number>`. |
 | `warning_code` | Current warning as `OK` or `W<number>`. |
 | `last_fault` | Most recently observed non-OK fault with boot-relative observation time. Retained when the fault clears or goes stale; resets on reboot. |
-| `active_mode` | Current operation as Idle, Running, Max, Turbo, Manual, or a raw code. |
+| `active_mode` | Current operation as Idle, Low, High, Turbo, Medium, Bath Override, or a raw code. |
 | `base_mode` | Configured/base mode as a raw code string. |
 | `model` | ERV model identity string. |
 | `firmware` | Firmware identity string. |
@@ -180,6 +182,7 @@ The numeric and text `fault_code`/`warning_code` keys are separate entities unde
 | `fault_active` | True for a current non-OK fault, false for OK, unknown when fault telemetry is missing or stale in monitoring mode. |
 | `fault_data_available` | True while a decoded fault register is younger than `sensor_timeout`; false before the first sample or after expiry. |
 | `communication_ok` | True while any valid bus frame is younger than `communication_timeout`; starts false. Does not establish ERV health or individual sensor freshness. |
+| `operating` | Reported operation: false for Idle (active code 0), true for known operating codes 1–5. Unknown before telemetry, after `sensor_timeout` in all modes, or for unrecognized codes. Supports HA history and runtime helpers; does not confirm physical fan movement. |
 | `humidity_control_enabled` | Observed humidity-control enable state; unknown when missing or stale in monitoring mode. |
 
 #### Controls (`select`, `number`, `switch`, `button`)
