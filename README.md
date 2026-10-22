@@ -2,6 +2,12 @@
 
 An ESP32 component to communicate with Broan, Nutone, Venmar, and VanEE ERVs via their rs485 interface.
 
+## Home Assistant / HACS
+
+<img src="custom_components/broan_erv/brand/icon.png" alt="Broan ERV airflow and heat-exchanger icon" width="96" height="96">
+
+The [Broan ERV companion integration](docs/hacs.md) can be installed through HACS as a custom repository. Select your existing ESPHome ERV device and telemetry in the HA setup UI, then manage the imported sensors under a dedicated Broan ERV integration. It includes an Operating sensor for activity history. HACS manages the HA companion; the UART firmware still runs on the ESP32 and is updated through ESPHome.
+
 The protocol is documented [here](https://spitko.net/2025/08/08/Reverse-Engineering-an-ERV/)
 
 ## Passive monitoring

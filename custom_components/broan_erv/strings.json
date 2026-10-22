@@ -1,0 +1,56 @@
+{
+  "title": "Broan ERV",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect an ESPHome ERV monitor",
+        "description": "Select the ESPHome device already receiving Broan ERV telemetry. ESPHome continues to provide the connection to the ERV.",
+        "data": {
+          "name": "ERV name",
+          "device_id": "ESPHome monitor"
+        }
+      },
+      "sources": {
+        "title": "Select ERV telemetry",
+        "description": "Select Active Mode (text or numeric) and any other sensors to import. Suggested matches must be checked. Leave optional fields empty to omit them. Keep the ESPHome source entities enabled.",
+        "data": {
+          "active_mode": "Active mode",
+          "base_mode": "Base mode",
+          "power": "Power",
+          "temperature": "Intake temperature",
+          "temperature_out": "Exhaust temperature",
+          "supply_fan_rpm": "Supply fan RPM",
+          "exhaust_fan_rpm": "Exhaust fan RPM",
+          "supply_fan_cfm": "Supply fan CFM",
+          "exhaust_fan_cfm": "Exhaust fan CFM",
+          "filter_life": "Filter life",
+          "humidity_target": "Humidity target",
+          "intermittent_on_time": "Intermittent on time",
+          "bath_boost_remaining": "Bath boost remaining",
+          "turbo_remaining": "Turbo remaining",
+          "fault_code": "Fault code",
+          "warning_code": "Warning code",
+          "last_fault": "Last fault",
+          "model": "Model",
+          "firmware": "Firmware",
+          "firmware_version": "Firmware version",
+          "hardware_revision": "Hardware revision",
+          "fault_active": "Fault active",
+          "fault_data_available": "Fault data available",
+          "communication_ok": "RS485 communication",
+          "humidity_control_enabled": "Humidity control enabled",
+          "operating": "Operating (native ESPHome source)"
+        }
+      }
+    },
+    "error": {
+      "invalid_source": "Select an enabled ESPHome entity on the chosen device with the correct sensor type.",
+      "required_source": "Select the Active Mode source."
+    },
+    "abort": {
+      "already_configured": "This ESPHome device is already configured.",
+      "device_missing": "The source ESPHome device no longer exists. Add its replacement as a new ERV.",
+      "no_sources": "No enabled sensor entities were found. Add the device through ESPHome and enable its ERV telemetry first."
+    }
+  }
+}

@@ -2,6 +2,8 @@
 
 Home Assistant can show that the ERV is idle now and was active earlier today. The existing Active Mode entity provides a mode timeline; the optional Operating binary sensor adds an active/idle timeline and a source for runtime totals. History is stored by Home Assistant, so monitor reboots do not erase already recorded history.
 
+For UI-based import and entity management, install the [HACS companion](hacs.md). The examples below also work directly with ESPHome entities; when using the companion, replace the example entity IDs with its imported sensor IDs.
+
 ## Enable the telemetry
 
 Update the external component, add these keys to your existing ESPHome `platform: broan` entries, and install the updated firmware. Merge with existing domain blocks rather than creating duplicate YAML keys.

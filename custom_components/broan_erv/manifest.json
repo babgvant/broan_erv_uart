@@ -1,0 +1,13 @@
+{
+  "domain": "broan_erv",
+  "name": "Broan ERV",
+  "codeowners": ["@babgvant"],
+  "config_flow": true,
+  "dependencies": ["esphome"],
+  "documentation": "https://github.com/babgvant/broan_erv_uart/blob/main/docs/hacs.md",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/babgvant/broan_erv_uart/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}
